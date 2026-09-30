@@ -1,0 +1,12 @@
+[package]
+name = "bake-agent-context-tasks"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bake = { package = "socketry-bake", version = "0.2.1", path = "../../bake-rust" }
+bake-agent-context = { version = "0.1.0", path = ".." }
+bake-cargo = { version = "0.2.0", path = "../../bake-cargo-rust" }
+bake-license = { version = "0.1.0", path = "../../bake-license-rust" }
+bake-releases = { version = "0.2.0", path = "../../bake-releases-rust" }

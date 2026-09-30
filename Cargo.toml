@@ -1,0 +1,28 @@
+[package]
+name = "bake-agent-context"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/socketry/bake-agent-context-rust"
+description = "Install context files from Cargo dependencies for coding agents"
+readme = "readme.md"
+include = ["src/**", "context/**", "Cargo.toml", "readme.md", "license.md", "releases.md"]
+
+[workspace]
+members = ["bake"]
+resolver = "3"
+
+[workspace.metadata.bake]
+manifest = "bake/Cargo.toml"
+
+[workspace.metadata.bake.release]
+reviewers = ["socketry/managers"]
+
+[dependencies]
+bake = { package = "socketry-bake", version = "0.2.1", path = "../bake-rust" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+yaml_serde = "0.10"
+
+[dev-dependencies]
+tempfile = "3.27"

@@ -1,0 +1,55 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check out Bake dependencies for local development
+        run: |
+          git clone --depth 1 --branch main https://github.com/socketry/bake-rust.git ../bake-rust
+          git clone --depth 1 --branch main https://github.com/socketry/bake-releases-rust.git ../bake-releases-rust
+          git clone --depth 1 --branch main https://github.com/socketry/bake-cargo-rust.git ../bake-cargo-rust
+          git clone --depth 1 --branch main https://github.com/socketry/bake-license-rust.git ../bake-license-rust
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the Cargo Bake launcher
+        run: cargo install --path ../bake-rust/crates/cargo-bake --locked
+      - name: Run workspace tests
+        run: cargo test --workspace --locked
+      - name: Exercise task registration
+        run: cargo bake --locked --list
+      - name: Exercise context tasks
+        run: |
+          cargo bake --locked agent:context:list
+          cargo bake --locked agent:context:agents-md
+
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check out Bake dependencies for local development
+        run: |
+          git clone --depth 1 --branch main https://github.com/socketry/bake-rust.git ../bake-rust
+          git clone --depth 1 --branch main https://github.com/socketry/bake-releases-rust.git ../bake-releases-rust
+          git clone --depth 1 --branch main https://github.com/socketry/bake-cargo-rust.git ../bake-cargo-rust
+          git clone --depth 1 --branch main https://github.com/socketry/bake-license-rust.git ../bake-license-rust
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings

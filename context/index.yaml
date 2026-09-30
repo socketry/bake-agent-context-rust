@@ -1,0 +1,5 @@
+description: Bake tasks for discovering and installing context files from Cargo dependencies.
+files:
+  - path: usage.md
+    title: Using dependency context
+    description: Install, list, and inspect context files shipped by Cargo packages.
