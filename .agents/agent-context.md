@@ -1,6 +1,6 @@
 # Agent context
 
-Read `conventions.md` before changing this repository.
+Read `.agents/conventions.md` before changing this repository.
 
 ## Purpose
 

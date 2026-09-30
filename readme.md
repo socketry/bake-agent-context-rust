@@ -8,7 +8,7 @@ Add the task library to the unpublished `bake/` crate in your project, then link
 
 ```toml
 [dependencies]
-bake = { package = "socketry-bake", version = "0.2" }
+bake = "0.17"
 bake-agent-context = "0.1"
 ```
 
@@ -36,7 +36,7 @@ cargo bake agent:context:install --package socketry-executor
 cargo bake agent:context:agents-md
 ```
 
-Generated context files are written to `.agents/context/`. Add `.agents/` to `.gitignore` if you want to keep this generated cache out of version control. The generated `agents.md` is intended to be committed.
+Generated context files are written to `.agents/context/`; ignore that directory in Git. Other files directly under `.agents/` may contain project-owned instructions. The generated `agents.md` is intended to be committed.
 
 ## Provide context from a crate
 
@@ -59,7 +59,8 @@ This crate includes guides for its users and for other crate authors:
 - [Getting Started](context/getting-started.md) explains how to add and run the Bake tasks.
 - [Using and Providing Context](context/usage.md) describes dependency context and how to publish context from a crate.
 - [Agent Context Specification](context/specification.md) defines the language-agnostic context directory and installation conventions.
+- [Rust Context](context/rust.md) provides shared development guidance for Socketry's Rust crates.
 
 ## Release process
 
-This crate has its own version and release history. See [releasing.md](releasing.md).
+This crate has its own version and release history. See the repository's [release instructions](https://github.com/socketry/bake-agent-context-rust/blob/main/.agents/releasing.md).

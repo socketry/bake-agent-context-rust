@@ -8,7 +8,7 @@ Bake tasks belong in your project's private `bake/` crate. Add the Bake task lib
 
 ```toml
 [dependencies]
-bake = { package = "socketry-bake", version = "0.2" }
+bake = "0.17"
 bake-agent-context = "0.1"
 ```
 
@@ -36,4 +36,4 @@ Use `cargo bake agent:context:list` to see which dependencies provide context. I
 
 ## Generated files
 
-`.agents/context/` is a generated cache and can be excluded from version control. The lower-case `agents.md` file is the project-facing guide index; review it and commit it with the project.
+`.agents/context/` is generated and should be excluded from version control. Other files directly under `.agents/` may contain project-owned instructions. The lower-case `agents.md` file is the project-facing guide index; review it and commit it with the project.

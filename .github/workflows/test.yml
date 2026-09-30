@@ -19,15 +19,9 @@ jobs:
         runner: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
-      - name: Check out Bake dependencies for local development
-        run: |
-          git clone --depth 1 --branch main https://github.com/socketry/bake-rust.git ../bake-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-releases-rust.git ../bake-releases-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-cargo-rust.git ../bake-cargo-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-license-rust.git ../bake-license-rust
       - uses: dtolnay/rust-toolchain@stable
       - name: Install the Cargo Bake launcher
-        run: cargo install --path ../bake-rust/crates/cargo-bake --locked
+        run: cargo install socketry-cargo-bake --version 0.17.0 --locked
       - name: Run workspace tests
         run: cargo test --workspace --locked
       - name: Exercise task registration
@@ -42,12 +36,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Check out Bake dependencies for local development
-        run: |
-          git clone --depth 1 --branch main https://github.com/socketry/bake-rust.git ../bake-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-releases-rust.git ../bake-releases-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-cargo-rust.git ../bake-cargo-rust
-          git clone --depth 1 --branch main https://github.com/socketry/bake-license-rust.git ../bake-license-rust
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
