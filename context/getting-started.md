@@ -8,7 +8,7 @@ Bake tasks belong in your project's private `bake/` crate. Add the Bake task lib
 
 ```toml
 [dependencies]
-bake = { package = "socketry-bake", version = "0.2" }
+bake = "0.17"
 bake-agent-context = "0.1"
 ```
 

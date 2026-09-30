@@ -8,7 +8,7 @@ Add the task library to the unpublished `bake/` crate in your project, then link
 
 ```toml
 [dependencies]
-bake = { package = "socketry-bake", version = "0.2" }
+bake = "0.17"
 bake-agent-context = "0.1"
 ```
 
