@@ -79,7 +79,9 @@ pub fn install(context: &mut Context, package: Option<String>) -> Result<String>
         installer.install_all()?
     };
 
-    AgentIndex::new(context.root()).update_agents_md("agents.md")?;
+    AgentIndex::new(context.root())
+        .with_packages(installer.packages())
+        .update_agents_md("agents.md")?;
 
     if installed.is_empty() {
         Ok("No dependency context was installed".to_owned())
@@ -94,6 +96,9 @@ pub fn agents_md(
     context: &mut Context,
     #[bake(default = "agents.md")] path: String,
 ) -> Result<String> {
-    AgentIndex::new(context.root()).update_agents_md(&path)?;
+    let installer = installer(context)?;
+    AgentIndex::new(context.root())
+        .with_packages(installer.packages())
+        .update_agents_md(&path)?;
     Ok(format!("Updated {path}"))
 }

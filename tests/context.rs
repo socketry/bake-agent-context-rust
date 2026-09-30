@@ -114,7 +114,7 @@ fn discovers_context_from_resolved_dependencies_and_lists_all_files() {
 }
 
 #[test]
-fn installs_context_generates_index_and_updates_agents_file_without_clobbering_other_sections() {
+fn installs_context_and_updates_agents_file_without_clobbering_other_sections() {
     let (_directory, root) = project();
     let installer = Installer::new(&root).unwrap();
     assert_eq!(installer.install_all().unwrap(), ["docs-provider"]);
@@ -124,20 +124,21 @@ fn installs_context_generates_index_and_updates_agents_file_without_clobbering_o
         fs::read_to_string(installed.join("reference/usage.md")).unwrap(),
         "# Usage\n\nNested usage guidance.\n"
     );
-    let generated_index = fs::read_to_string(installed.join("index.yaml")).unwrap();
-    assert!(generated_index.contains("Guidance from the test provider."));
-    assert!(generated_index.contains("getting-started.md"));
+    assert!(!installed.join("index.yaml").exists());
 
     write(
         &root,
         "agents.md",
         "# Agent\n\nProject-specific introduction.\n\n## Context\n\nOld generated section.\n\n## Commands\n\nKeep this section.\n",
     );
-    let index = AgentIndex::new(&root);
+    let index = AgentIndex::new(&root).with_packages(installer.packages());
     index.update_agents_md("agents.md").unwrap();
     let first = fs::read_to_string(root.join("agents.md")).unwrap();
     assert!(first.contains("Project-specific introduction."));
+    assert!(first.contains("Guidance from the test provider."));
     assert!(first.contains("[Getting Started](.agents/context/docs-provider/getting-started.md)"));
+    assert!(first.contains("First paragraph."));
+    assert!(!first.contains("Later details."));
     assert!(first.contains("## Commands\n\nKeep this section."));
     assert!(!first.contains("Old generated section."));
 
@@ -185,26 +186,24 @@ fn show_supports_implicit_markdown_extension_and_rejects_parent_paths() {
 }
 
 #[test]
-fn preserves_provider_index_and_ignores_unsafe_index_paths() {
+fn extracts_title_and_first_sentence_from_markdown() {
     let (_directory, root) = project();
-    let provider_index = "description: Curated package guidance.\nfiles:\n  - path: getting-started.md\n    title: Curated title\n    description: Curated summary.\n  - path: ../Cargo.toml\n    title: Outside file\n    description: Must not be linked.\n";
     write(
         &root.parent().unwrap().join("provider"),
-        "context/index.yaml",
-        provider_index,
+        "context/reference/usage.md",
+        "# Nested usage\n\nRead the guide first. Then apply its examples.\n",
     );
 
     let installer = Installer::new(&root).unwrap();
     installer.install_all().unwrap();
-    let installed_index = root.join(".agents/context/docs-provider/index.yaml");
-    assert_eq!(fs::read_to_string(installed_index).unwrap(), provider_index);
 
-    let section = AgentIndex::new(&root).generate_context_section().unwrap();
-    assert!(section.contains("Curated package guidance."));
-    assert!(section.contains("[Curated title](.agents/context/docs-provider/getting-started.md)"));
-    assert!(section.contains("Curated summary."));
-    assert!(!section.contains("Outside file"));
-    assert!(!section.contains("Must not be linked."));
+    let section = AgentIndex::new(&root)
+        .with_packages(installer.packages())
+        .generate_context_section()
+        .unwrap();
+    assert!(section.contains("[Nested usage](.agents/context/docs-provider/reference/usage.md)"));
+    assert!(section.contains("Read the guide first."));
+    assert!(!section.contains("Then apply its examples."));
 }
 
 #[test]

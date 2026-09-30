@@ -3,27 +3,15 @@
 
 use super::installer::{ContextPackage, markdown_files};
 use bake::{Error, Result};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub(crate) struct ContextDocumentIndex {
-    #[serde(default)]
-    pub(crate) description: Option<String>,
-    #[serde(default)]
-    pub(crate) metadata: Option<Value>,
-    #[serde(default)]
-    pub(crate) files: Vec<ContextDocument>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct ContextDocument {
-    pub(crate) path: String,
-    pub(crate) title: String,
-    #[serde(default)]
-    pub(crate) description: Option<String>,
+#[derive(Clone, Debug)]
+struct ContextDocument {
+    path: PathBuf,
+    title: String,
+    description: Option<String>,
 }
 
 /// Manages the generated Context section in a project's agents.md file.
@@ -32,6 +20,7 @@ pub struct AgentIndex {
     root: PathBuf,
     context_path: PathBuf,
     context_link_path: PathBuf,
+    package_descriptions: HashMap<String, String>,
 }
 
 impl AgentIndex {
@@ -41,7 +30,22 @@ impl AgentIndex {
             context_path: root.join(".agents/context"),
             root,
             context_link_path: PathBuf::from(".agents/context"),
+            package_descriptions: HashMap::new(),
         }
+    }
+
+    /// Add Cargo package descriptions to the generated context section.
+    pub fn with_packages(mut self, packages: &[ContextPackage]) -> Self {
+        self.package_descriptions = packages
+            .iter()
+            .filter_map(|package| {
+                package
+                    .description
+                    .as_ref()
+                    .map(|description| (package.selector().to_owned(), description.clone()))
+            })
+            .collect();
+        self
     }
 
     pub fn context_path(&self) -> &Path {
@@ -66,50 +70,25 @@ impl AgentIndex {
             return Ok(sections.join("\n"));
         }
 
-        for (package_name, package_path, files) in packages {
+        for (package_name, files) in packages {
             sections.push(format!("### {package_name}"));
             sections.push(String::new());
-
-            let index = load_index(&package_path, &package_name)?;
             sections.push(
-                index
-                    .description
-                    .clone()
+                self.package_descriptions
+                    .get(&package_name)
+                    .cloned()
                     .unwrap_or_else(|| format!("Context files for {package_name}")),
             );
             sections.push(String::new());
 
-            if index.files.is_empty() {
-                for file in files {
-                    let (title, description) = extract_content(&file)?;
-                    let relative_path = file.strip_prefix(&package_path).map_err(|error| {
-                        Error::new(format!("cannot make context path relative: {error}"))
-                    })?;
-                    append_document(
-                        &mut sections,
-                        &self.context_link_path.join(&package_name),
-                        relative_path,
-                        &title,
-                        description.as_deref(),
-                    );
-                }
-            } else {
-                for document in index.files {
-                    let relative_path = match safe_relative_path(&document.path) {
-                        Some(path) => path,
-                        None => continue,
-                    };
-                    if !package_path.join(&relative_path).is_file() {
-                        continue;
-                    }
-                    append_document(
-                        &mut sections,
-                        &self.context_link_path.join(&package_name),
-                        &relative_path,
-                        &document.title,
-                        document.description.as_deref(),
-                    );
-                }
+            for document in files {
+                append_document(
+                    &mut sections,
+                    &self.context_link_path.join(&package_name),
+                    &document.path,
+                    &document.title,
+                    document.description.as_deref(),
+                );
             }
         }
 
@@ -153,7 +132,7 @@ impl AgentIndex {
             .map_err(|error| Error::new(format!("cannot write {}: {error}", path.display())))
     }
 
-    fn collect_context_packages(&self) -> Result<Vec<(String, PathBuf, Vec<PathBuf>)>> {
+    fn collect_context_packages(&self) -> Result<Vec<(String, Vec<ContextDocument>)>> {
         let entries = match fs::read_dir(&self.context_path) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -173,83 +152,25 @@ impl AgentIndex {
                 continue;
             }
             let package_path = entry.path();
-            let files = markdown_files(&package_path)?;
+            let mut files = Vec::new();
+            for path in markdown_files(&package_path)? {
+                let (title, description) = extract_content(&path)?;
+                let relative_path = path.strip_prefix(&package_path).map_err(|error| {
+                    Error::new(format!("cannot make context path relative: {error}"))
+                })?;
+                files.push(ContextDocument {
+                    path: relative_path.to_path_buf(),
+                    title,
+                    description,
+                });
+            }
+            files.sort_by_key(|document| canonical_order(&document.path));
             if !files.is_empty() {
-                packages.push((
-                    entry.file_name().to_string_lossy().into_owned(),
-                    package_path,
-                    files,
-                ));
+                packages.push((entry.file_name().to_string_lossy().into_owned(), files));
             }
         }
         packages.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(packages)
-    }
-}
-
-pub(crate) fn write_generated_index(package: &ContextPackage, destination: &Path) -> Result<()> {
-    let index_path = destination.join("index.yaml");
-    if index_path.exists() {
-        return Ok(());
-    }
-
-    let mut markdown = markdown_files(destination)?;
-    markdown.retain(|path| path != &index_path);
-    markdown.sort_by_key(|path| canonical_order(path));
-
-    let files = markdown
-        .into_iter()
-        .map(|path| {
-            let (title, description) = extract_content(&path)?;
-            let relative = path.strip_prefix(destination).map_err(|error| {
-                Error::new(format!("cannot make context path relative: {error}"))
-            })?;
-            Ok(ContextDocument {
-                path: path_to_string(relative),
-                title,
-                description,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    let index = ContextDocumentIndex {
-        description: Some(
-            package
-                .description
-                .clone()
-                .unwrap_or_else(|| format!("Context files for {}", package.name)),
-        ),
-        metadata: package.metadata.clone(),
-        files,
-    };
-    let contents = yaml_serde::to_string(&index)
-        .map_err(|error| Error::new(format!("cannot serialize context index: {error}")))?;
-    fs::write(&index_path, contents)
-        .map_err(|error| Error::new(format!("cannot write {}: {error}", index_path.display())))
-}
-
-fn load_index(context_path: &Path, package_name: &str) -> Result<ContextDocumentIndex> {
-    let index_path = context_path.join("index.yaml");
-    match fs::read_to_string(&index_path) {
-        Ok(contents) => match yaml_serde::from_str(&contents) {
-            Ok(index) => Ok(index),
-            Err(_) => Ok(fallback_index(package_name)),
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(fallback_index(package_name))
-        }
-        Err(error) => Err(Error::new(format!(
-            "cannot read {}: {error}",
-            index_path.display()
-        ))),
-    }
-}
-
-fn fallback_index(package_name: &str) -> ContextDocumentIndex {
-    ContextDocumentIndex {
-        description: Some(format!("Context files for {package_name}")),
-        metadata: None,
-        files: Vec::new(),
     }
 }
 
@@ -341,17 +262,6 @@ fn markdown_link(path: &Path) -> String {
         .replace(')', "%29")
 }
 
-fn safe_relative_path(path: &str) -> Option<PathBuf> {
-    let path = Path::new(path);
-    if path
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return None;
-    }
-    Some(path.to_path_buf())
-}
-
 fn canonical_order(path: &Path) -> (usize, String, String) {
     const CANONICAL: &[&str] = &[
         "getting-started",
@@ -384,37 +294,45 @@ fn extract_content(path: &Path) -> Result<(String, Option<String>)> {
             heading_level(line).map(|_| line.trim_start_matches('#').trim().to_owned())
         })
         .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| "Documentation".to_owned());
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("Documentation")
+                .replace('-', " ")
+        });
 
-    let mut description_lines = Vec::new();
-    let mut content_started = false;
-    for line in &lines {
-        if heading_level(line).is_some() {
-            continue;
-        }
-        if line.is_empty() {
-            if content_started {
-                break;
-            }
-            continue;
-        }
-        content_started = true;
-        description_lines.push(*line);
-    }
+    let first_paragraph = lines
+        .iter()
+        .copied()
+        .filter(|line| heading_level(line).is_none())
+        .skip_while(|line| line.is_empty())
+        .take_while(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
 
-    let description = description_lines.join(" ");
-    let description = if description.chars().count() > 200 {
-        Some(format!(
-            "{}...",
-            description.chars().take(197).collect::<String>()
-        ))
-    } else if description.is_empty() {
-        None
-    } else {
-        Some(description)
-    };
+    let description = first_sentence(&first_paragraph);
 
     Ok((title, description))
+}
+
+fn first_sentence(paragraph: &str) -> Option<String> {
+    let paragraph = paragraph.trim();
+    if paragraph.is_empty() {
+        return None;
+    }
+
+    for (index, character) in paragraph.char_indices() {
+        if matches!(character, '.' | '!' | '?')
+            && paragraph[index + character.len_utf8()..]
+                .chars()
+                .next()
+                .is_none_or(char::is_whitespace)
+        {
+            return Some(paragraph[..index + character.len_utf8()].to_owned());
+        }
+    }
+
+    Some(paragraph.to_owned())
 }
 
 fn path_to_string(path: &Path) -> String {

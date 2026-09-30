@@ -1,10 +1,8 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
-use super::index::write_generated_index;
 use bake::{Error, Result};
 use serde::Deserialize;
-use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -17,7 +15,6 @@ pub struct ContextPackage {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
-    pub metadata: Option<Value>,
     pub context_path: PathBuf,
     selector: String,
 }
@@ -127,7 +124,6 @@ impl Installer {
                 name: package.name,
                 version: package.version,
                 description: package.description,
-                metadata: package.metadata,
                 context_path,
                 selector: String::new(),
             });
@@ -235,7 +231,6 @@ impl Installer {
         let destination = self.context_path.join(&package.selector);
         remove_existing(&destination)?;
         copy_context_tree(&package.context_path, &destination)?;
-        write_generated_index(&package, &destination)?;
         Ok(true)
     }
 
@@ -277,7 +272,6 @@ struct CargoPackage {
     version: String,
     description: Option<String>,
     manifest_path: PathBuf,
-    metadata: Option<Value>,
 }
 
 fn find_context_file(context_path: &Path, file: &str) -> Result<Option<PathBuf>> {
@@ -318,12 +312,12 @@ fn find_context_file(context_path: &Path, file: &str) -> Result<Option<PathBuf>>
 
 pub(crate) fn markdown_files(root: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    collect_markdown_files(root, root, &mut files)?;
+    collect_markdown_files(root, &mut files)?;
     files.sort();
     Ok(files)
 }
 
-fn collect_markdown_files(root: &Path, directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_markdown_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     let entries = fs::read_dir(directory)
         .map_err(|error| Error::new(format!("cannot read {}: {error}", directory.display())))?;
     for entry in entries {
@@ -331,12 +325,11 @@ fn collect_markdown_files(root: &Path, directory: &Path, files: &mut Vec<PathBuf
         let file_type = entry.file_type()?;
         let path = entry.path();
         if file_type.is_dir() {
-            collect_markdown_files(root, &path, files)?;
+            collect_markdown_files(&path, files)?;
         } else if file_type.is_file()
             && path
                 .extension()
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
-            && path != root.join("index.yaml")
         {
             files.push(path);
         }

@@ -11,7 +11,7 @@ Read `conventions.md` before changing this repository.
 - Context providers place files in a top-level `context/` directory and include it in the published crate archive.
 - Installed context is grouped by crate name beneath `.agents/context/`.
 - Workspace members are skipped by default; resolved dependency packages are scanned.
-- The default generated index is `agents.md`, preserving the behavior of the Ruby `agent-context` gem.
+- The generated `agents.md` contains links to context Markdown files, using each file's first heading as its title and its first sentence as its summary.
 - Task names keep the Ruby-compatible `agent:context:*` namespace.
 - `cargo metadata` is run from the project root and cached within a Bake task chain.
 

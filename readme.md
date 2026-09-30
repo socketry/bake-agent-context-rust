@@ -46,12 +46,19 @@ Add a top-level `context/` directory to the crate and ensure Cargo packages it. 
 my-crate/
 ├── Cargo.toml
 ├── context/
-│   ├── index.yaml       # optional
 │   └── getting-started.md
 └── src/
 ```
 
-Without `index.yaml`, Bake Agent Context generates one when installing the crate. The generated index uses the crate description and Markdown headings and first paragraphs.
+Bake Agent Context uses the crate description from `Cargo.toml` and extracts each Markdown file's title and first sentence for the generated `agents.md` section. No separate index file or Markdown front matter is needed.
+
+## Context
+
+This crate includes guides for its users and for other crate authors:
+
+- [Getting Started](context/getting-started.md) explains how to add and run the Bake tasks.
+- [Using and Providing Context](context/usage.md) describes dependency context and how to publish context from a crate.
+- [Agent Context Specification](context/specification.md) defines the language-agnostic context directory and installation conventions.
 
 ## Release process
 
