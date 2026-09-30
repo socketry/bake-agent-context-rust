@@ -12,7 +12,7 @@ Run `cargo bake agent:context:list --package CRATE` to list one provider's files
 
 Run `cargo bake agent:context:install` to install or refresh context from all resolved dependencies. Files are copied under `.agents/context/SELECTOR/`, where the selector is the crate name or the displayed `crate@version` selector. The task updates the generated Context section in `agents.md`. The generated section links to Markdown files, using each file's first heading as its title and its first prose sentence as its summary.
 
-The `.agents/` directory is generated and can be added to `.gitignore`. The lower-case `agents.md` file is intended to be committed. The task preserves project-specific sections in that file and replaces only its generated Context section. Do not edit files under `.agents/context/`; reinstalling replaces them with the provider's files.
+The `.agents/context/` directory is generated and should be added to `.gitignore`. Other files directly under `.agents/` may contain project-owned instructions. The lower-case `agents.md` file is intended to be committed. The task preserves project-specific sections in that file and replaces only its generated Context section. Do not edit files under `.agents/context/`; reinstalling replaces them with the provider's files.
 
 Use `cargo bake agent:context:agents-md` to refresh the Context section after changing installed files or dependency metadata without reinstalling files.
 
