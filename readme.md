@@ -64,3 +64,11 @@ This crate includes guides for its users and for other crate authors:
 ## Release process
 
 This crate has its own version and release history. See the repository's [release instructions](https://github.com/socketry/bake-agent-context-rust/blob/main/.agents/releasing.md).
+
+## Contributing
+
+Please open an issue or pull request on [GitHub](https://github.com/socketry/bake-agent-context-rust).
+
+### Agent Context
+
+Before contributing, read `agents.md` and the relevant context files it links. If `agents.md` is missing or out of date, run `cargo bake agent:context:install` to install context from dependencies and update the index.
