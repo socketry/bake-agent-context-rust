@@ -33,6 +33,7 @@ A **Context Provider** is any software package, library, or module that includes
 A **Context Consumer** is any project or tool that utilizes contextual information from its dependencies. Context consumers:
 
 - Install context from their dependencies into a `.agents/context/` directory.
+- May install skill-marked context documents into a `.agents/skills/` directory.
 - Use tools to discover and access available context.
 - Apply context based on file patterns and metadata.
 
@@ -142,6 +143,22 @@ Common file names:
 - `security.md`
 - `migration-guide.md`
 
+### 4.4 Skill Documents
+
+A context provider may distribute an Agent Skill as a Markdown document directly
+inside `context/`. The document MUST use YAML front matter with `type: skill`
+and a non-empty `description`. Its filename, without the `.md` extension, is
+the local skill name. A directory with the same name MAY contain skill
+resources. Consumers MUST prefix the local name with the provider package name
+and a hyphen to produce the globally unique installed skill name.
+
+Consumers that support skills MUST install the document as
+`.agents/skills/<package-name>-<local-name>/SKILL.md`, with the installed name
+and `description` in its front matter. Files in the matching resource directory
+MUST be copied into that skill directory. Skill documents and their resources
+MUST NOT also be copied into `.agents/context/` or included in the generated
+context index.
+
 ## 5. Discovery and Installation
 
 ### 5.1 Discovery Process
@@ -163,14 +180,22 @@ The discovery process SHOULD integrate with the target language's package manage
 Context installation MUST follow these principles:
 
 1. **Copy Strategy**: Context files SHOULD be copied rather than symlinked.
-2. **Namespace Isolation**: Each package's context MUST be installed in its own subdirectory.
-3. **Preserve Structure**: The internal structure of the `context/` directory MUST be preserved.
+2. **Namespace Isolation**: Each package's ordinary context MUST be installed in its own subdirectory.
+3. **Preserve Structure**: The internal structure of ordinary context files MUST be preserved.
+4. **Skill Separation**: Skill documents and their resources MUST be installed as skills only, not duplicated as ordinary context.
 
 ### 5.3 Installation Algorithm
 
 ```
 FOR each package with context:
-  CREATE directory .agents/context/package-name/
-  COPY all files recursively from package/context/ to .agents/context/package-name/
+  FOR each file in package/context/:
+    IF file is a skill document or belongs to a skill resource directory:
+      IF the consumer supports skills:
+        INSTALL the document as .agents/skills/skill-name/SKILL.md
+        COPY its matching resource directory into that skill directory
+      ELSE:
+        SKIP it
+    ELSE:
+      COPY it into .agents/context/package-name/, preserving its relative path
 END
 ```

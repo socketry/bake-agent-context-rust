@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Install dependency-provided Agent Skills from context documents with YAML front matter.
+- Install context and skills together with `agent:context:install`, keeping skill documents and resources out of the context index.
+- Prefix installed skill names with their provider's Cargo package name.
 
 ## v0.1.3
 

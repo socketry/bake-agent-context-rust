@@ -30,11 +30,11 @@ Run this from the project root:
 cargo bake agent:context:install
 ```
 
-The task scans resolved Cargo dependencies for a top-level `context/` directory, copies each provider's files into `.agents/context/`, and updates the Context section of `agents.md`.
+The task scans resolved Cargo dependencies for a top-level `context/` directory, copies ordinary context files into `.agents/context/`, installs skill-marked documents and their resources into `.agents/skills/`, and updates the Context section of `agents.md`. Skill-marked documents are not copied into the context directory or listed in `agents.md`.
 
-Use `cargo bake agent:context:list` to see which dependencies provide context. Install one provider with `cargo bake agent:context:install --package CRATE`, or inspect one of its files with `cargo bake agent:context:show --package CRATE --file getting-started`.
+Use `cargo bake agent:context:list` to see which dependencies provide ordinary context. Install context and skills from one provider with `cargo bake agent:context:install --package CRATE`, or inspect one of its context files with `cargo bake agent:context:show --package CRATE --file getting-started`.
 
-List skills provided by dependencies with `cargo bake agent:context:skill:list`. Run `cargo bake agent:context:skill:install` to install all of them, or select a provider and skill with `--package CRATE --skill SKILL`.
+List skills provided by dependencies with `cargo bake agent:context:skill:list`. The main install task installs all of them; use `cargo bake agent:context:skill:install --package CRATE --skill CRATE-SKILL` to install a specific skill independently. The skill name is prefixed with the provider crate name.
 
 ## Generated files
 

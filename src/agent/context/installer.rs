@@ -189,6 +189,10 @@ impl Installer {
     }
 
     pub fn list_context_files(&self, package: &ContextPackage) -> Result<Vec<ContextFile>> {
+        let skill_names: HashSet<_> = super::skill::list_package_skills(package)?
+            .into_iter()
+            .map(|skill| skill.source_name)
+            .collect();
         let mut files = Vec::new();
         collect_files(&package.context_path, &mut files)?;
         files.sort();
@@ -201,6 +205,7 @@ impl Installer {
                         path: path.to_path_buf(),
                     })
             })
+            .filter(|file| !is_skill_context_path(&file.path, &skill_names))
             .collect())
     }
 
@@ -211,6 +216,24 @@ impl Installer {
         let Some(path) = find_context_file(&package.context_path, file)? else {
             return Ok(None);
         };
+
+        let skill_names: HashSet<_> = super::skill::list_package_skills(&package)?
+            .into_iter()
+            .map(|skill| skill.source_name)
+            .collect();
+        let context_root = package.context_path.canonicalize().map_err(|error| {
+            Error::new(format!(
+                "cannot resolve {}: {error}",
+                package.context_path.display()
+            ))
+        })?;
+        let relative_path = path
+            .strip_prefix(&context_root)
+            .map_err(|error| Error::new(format!("cannot make context path relative: {error}")))?;
+        if is_skill_context_path(relative_path, &skill_names) {
+            return Ok(None);
+        }
+
         fs::read_to_string(&path)
             .map(Some)
             .map_err(|error| Error::new(format!("cannot read {}: {error}", path.display())))
@@ -221,6 +244,8 @@ impl Installer {
         let Some(package) = self.find_package(selector)? else {
             return Ok(false);
         };
+        let skills = super::skill::list_package_skills(&package)?;
+        let skill_names: HashSet<_> = skills.into_iter().map(|skill| skill.source_name).collect();
 
         fs::create_dir_all(&self.context_path).map_err(|error| {
             Error::new(format!(
@@ -230,8 +255,11 @@ impl Installer {
         })?;
         let destination = self.context_path.join(&package.selector);
         remove_existing(&destination)?;
-        copy_context_tree(&package.context_path, &destination)?;
-        Ok(true)
+        let copied = copy_context_tree(&package.context_path, &destination, &skill_names, true)?;
+        if !copied {
+            remove_existing(&destination)?;
+        }
+        Ok(copied)
     }
 
     /// Install all resolved dependency packages that provide context.
@@ -353,7 +381,12 @@ fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn copy_context_tree(source: &Path, destination: &Path) -> Result<()> {
+fn copy_context_tree(
+    source: &Path,
+    destination: &Path,
+    skill_names: &HashSet<String>,
+    root: bool,
+) -> Result<bool> {
     let source_type = fs::symlink_metadata(source)
         .map_err(|error| Error::new(format!("cannot inspect {}: {error}", source.display())))?
         .file_type();
@@ -368,14 +401,36 @@ fn copy_context_tree(source: &Path, destination: &Path) -> Result<()> {
         .map_err(|error| Error::new(format!("cannot create {}: {error}", destination.display())))?;
     let entries = fs::read_dir(source)
         .map_err(|error| Error::new(format!("cannot read {}: {error}", source.display())))?;
+    let mut copied = false;
     for entry in entries {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let source_path = entry.path();
         let destination_path = destination.join(entry.file_name());
         if file_type.is_dir() {
-            copy_context_tree(&source_path, &destination_path)?;
+            if root
+                && entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| skill_names.contains(name))
+            {
+                continue;
+            }
+
+            if copy_context_tree(&source_path, &destination_path, skill_names, false)? {
+                copied = true;
+            } else {
+                fs::remove_dir(&destination_path).map_err(|error| {
+                    Error::new(format!(
+                        "cannot remove empty context directory {}: {error}",
+                        destination_path.display()
+                    ))
+                })?;
+            }
         } else if file_type.is_file() {
+            if root && is_skill_markdown(&source_path, skill_names) {
+                continue;
+            }
             fs::copy(&source_path, &destination_path).map_err(|error| {
                 Error::new(format!(
                     "cannot copy {} to {}: {error}",
@@ -383,9 +438,34 @@ fn copy_context_tree(source: &Path, destination: &Path) -> Result<()> {
                     destination_path.display()
                 ))
             })?;
+            copied = true;
         }
     }
-    Ok(())
+    Ok(copied)
+}
+
+fn is_skill_context_path(path: &Path, skill_names: &HashSet<String>) -> bool {
+    let mut components = path.components();
+    let Some(first) = components
+        .next()
+        .and_then(|component| component.as_os_str().to_str())
+    else {
+        return false;
+    };
+    if skill_names.contains(first) {
+        return true;
+    }
+
+    components.next().is_none() && is_skill_markdown(path, skill_names)
+}
+
+fn is_skill_markdown(path: &Path, skill_names: &HashSet<String>) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+        && path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| skill_names.contains(stem))
 }
 
 fn remove_existing(path: &Path) -> Result<()> {

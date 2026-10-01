@@ -9,11 +9,11 @@ Read `.agents/conventions.md` before changing this repository.
 ## Important behavior
 
 - Context providers place files in a top-level `context/` directory and include it in the published crate archive.
-- Installed context is grouped by crate name beneath `.agents/context/`.
+- Ordinary context is grouped by crate name beneath `.agents/context/`; skill-marked documents and their assets are installed only under `.agents/skills/`.
 - Workspace members are skipped by default; resolved dependency packages are scanned.
 - The generated `agents.md` contains links to context Markdown files, using each file's first heading as its title and its first sentence as its summary.
-- A YAML front matter `description`, when present, takes precedence over the first sentence; `type: skill` opts a root-level context document into skill installation.
-- Dependency skills install into `.agents/skills/` and use an ownership registry to prevent overwriting project-owned skills.
+- A YAML front matter `description`, when present, takes precedence over the first sentence; `type: skill` opts a root-level document into skill installation and excludes it from context copying and indexing.
+- Dependency skills install into `.agents/skills/` with names prefixed by their Cargo package name; an ownership registry prevents overwriting project-owned skills.
 - Task names keep the Ruby-compatible `agent:context:*` namespace.
 - `cargo metadata` is run from the project root and cached within a Bake task chain.
 
