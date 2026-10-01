@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+- Install dependency-provided Agent Skills from context documents with YAML front matter.
+
 ## v0.1.3
 
 - Parse context documents and update the generated index with the Markdown AST.

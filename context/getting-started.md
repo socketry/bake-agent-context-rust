@@ -34,6 +34,8 @@ The task scans resolved Cargo dependencies for a top-level `context/` directory,
 
 Use `cargo bake agent:context:list` to see which dependencies provide context. Install one provider with `cargo bake agent:context:install --package CRATE`, or inspect one of its files with `cargo bake agent:context:show --package CRATE --file getting-started`.
 
+List skills provided by dependencies with `cargo bake agent:context:skill:list`. Run `cargo bake agent:context:skill:install` to install all of them, or select a provider and skill with `--package CRATE --skill SKILL`.
+
 ## Generated files
 
-`.agents/context/` is generated and should be excluded from version control. Other files directly under `.agents/` may contain project-owned instructions. The lower-case `agents.md` file is the project-facing guide index; review it and commit it with the project.
+`.agents/context/` and `.agents/skills/` are generated and should be excluded from version control. Other files directly under `.agents/` may contain project-owned instructions. The lower-case `agents.md` file is the project-facing guide index; review it and commit it with the project.

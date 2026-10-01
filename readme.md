@@ -34,9 +34,12 @@ cargo bake agent:context:list --package socketry-executor
 cargo bake agent:context:show --package socketry-executor --file getting-started
 cargo bake agent:context:install --package socketry-executor
 cargo bake agent:context:agents-md
+cargo bake agent:context:skill:list
+cargo bake agent:context:skill:install
+cargo bake agent:context:skill:install --package socketry-executor --skill initial-gem-setup
 ```
 
-Generated context files are written to `.agents/context/`; ignore that directory in Git. Other files directly under `.agents/` may contain project-owned instructions. The generated `agents.md` is intended to be committed.
+Generated context and skill files are written to `.agents/context/` and `.agents/skills/`; ignore those directories in Git. Other files directly under `.agents/` may contain project-owned instructions. The generated `agents.md` is intended to be committed.
 
 ## Provide context from a crate
 
@@ -50,7 +53,7 @@ my-crate/
 └── src/
 ```
 
-Bake Agent Context uses the crate description from `Cargo.toml` and extracts each Markdown file's title and first sentence for the generated `agents.md` section. No separate index file or Markdown front matter is needed.
+Bake Agent Context uses the crate description from `Cargo.toml` and extracts each Markdown file's title and first sentence for the generated `agents.md` section. Ordinary context files need no Markdown front matter. A context document can opt into skill installation with YAML front matter; see [Using and Providing Context](context/usage.md).
 
 ## Context
 
@@ -61,6 +64,18 @@ This crate includes guides for its users and for other crate authors:
 - [Agent Context Specification](context/specification.md) defines the language-agnostic context directory and installation conventions.
 - [Rust Context](context/rust.md) provides shared development guidance for Socketry's Rust crates.
 
-## Release process
+## Releasing
 
-This crate has its own version and release history. See the repository's [release instructions](https://github.com/socketry/bake-agent-context-rust/blob/main/.agents/releasing.md).
+Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`,
+or `bump --version X.Y.Z`), then run `cargo bake cargo:release` and open a
+pull request. After review and merge, GitHub Actions publishes the release
+when the configured `crates-io` environment approves it. See the
+[Cargo publishing guide](https://github.com/socketry/bake-cargo-rust/blob/main/context/publishing.md).
+
+## Contributing
+
+Please open an issue or pull request on [GitHub](https://github.com/socketry/bake-agent-context-rust).
+
+### Agent Context
+
+Before contributing, read `agents.md` and the relevant context files it links. If `agents.md` is missing or out of date, run `cargo bake agent:context:install` to install context from dependencies and update the index.
