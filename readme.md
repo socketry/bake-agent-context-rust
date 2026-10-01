@@ -63,6 +63,7 @@ This crate includes guides for its users and for other crate authors:
 
 - [Getting Started](context/getting-started.md) explains how to add and run the Bake tasks.
 - [Using and Providing Context](context/usage.md) describes dependency context and how to publish context from a crate.
+- [Agent Context](context/agent-context.md) explains how to organize package guidance and repository-only instructions.
 - [Agent Context Specification](context/specification.md) defines the language-agnostic context directory and installation conventions.
 - [Rust Context](context/rust.md) provides shared development guidance for Socketry's Rust crates.
 
