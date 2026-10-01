@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use bake::Registry;
-use bake_agent_context::agent::context::{AgentIndex, Installer};
+use bake_agent_context::agent::context::{AgentIndex, Installer, install_skills, list_skills};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -45,6 +45,16 @@ fn project() -> (TempDir, std::path::PathBuf) {
         "# Usage\n\nNested usage guidance.\n",
     );
     write(&provider, "context/example.json", "{\"enabled\": true}\n");
+    write(
+        &provider,
+        "context/initial-gem-setup.md",
+        "---\ntype: skill\ndescription: Set up a new Ruby gem using the project conventions.\n---\n\n# Initial Gem Setup\n\nCreate the gem files and verify the package.\n",
+    );
+    write(
+        &provider,
+        "context/initial-gem-setup/references/checklist.md",
+        "Run the project checks before publishing.\n",
+    );
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let output = Command::new(cargo)
@@ -109,7 +119,87 @@ fn discovers_context_from_resolved_dependencies_and_lists_all_files() {
         .collect();
     assert_eq!(
         paths,
-        ["example.json", "getting-started.md", "reference/usage.md"]
+        [
+            "example.json",
+            "getting-started.md",
+            "initial-gem-setup/references/checklist.md",
+            "initial-gem-setup.md",
+            "reference/usage.md"
+        ]
+    );
+}
+
+#[test]
+fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
+    let (_directory, root) = project();
+    let installer = Installer::new(&root).unwrap();
+    let skills = list_skills(&installer, None).unwrap();
+
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0].name, "initial-gem-setup");
+    assert_eq!(skills[0].package_selector(), "docs-provider");
+    assert_eq!(
+        skills[0].description,
+        "Set up a new Ruby gem using the project conventions."
+    );
+
+    assert_eq!(
+        install_skills(&installer, Some("docs-provider"), Some("initial-gem-setup")).unwrap(),
+        ["initial-gem-setup (docs-provider)"]
+    );
+
+    let skill_directory = root.join(".agents/skills/initial-gem-setup");
+    let skill_markdown = fs::read_to_string(skill_directory.join("SKILL.md")).unwrap();
+    assert!(skill_markdown.starts_with(
+        "---\nname: initial-gem-setup\ndescription: Set up a new Ruby gem using the project conventions.\n---\n\n"
+    ));
+    assert!(skill_markdown.contains("# Initial Gem Setup"));
+    assert_eq!(
+        fs::read_to_string(skill_directory.join("references/checklist.md")).unwrap(),
+        "Run the project checks before publishing.\n"
+    );
+
+    // Reinstallation updates dependency-owned skills without replacing other skills.
+    write(
+        &root.parent().unwrap().join("provider"),
+        "context/initial-gem-setup/references/checklist.md",
+        "Updated checklist.\n",
+    );
+    install_skills(&installer, None, None).unwrap();
+    assert_eq!(
+        fs::read_to_string(skill_directory.join("references/checklist.md")).unwrap(),
+        "Updated checklist.\n"
+    );
+
+    fs::remove_file(
+        root.parent()
+            .unwrap()
+            .join("provider/context/initial-gem-setup.md"),
+    )
+    .unwrap();
+    assert!(install_skills(&installer, None, None).unwrap().is_empty());
+    assert!(!skill_directory.exists());
+}
+
+#[test]
+fn skill_installation_does_not_overwrite_project_owned_skills() {
+    let (_directory, root) = project();
+    write(
+        &root,
+        ".agents/skills/initial-gem-setup/SKILL.md",
+        "Project-owned skill.\n",
+    );
+    let installer = Installer::new(&root).unwrap();
+
+    let error = install_skills(&installer, None, None).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("not managed by Bake Agent Context")
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".agents/skills/initial-gem-setup/SKILL.md")).unwrap(),
+        "Project-owned skill.\n"
     );
 }
 
@@ -137,6 +227,7 @@ fn installs_context_and_updates_agents_file_without_clobbering_other_sections() 
     assert!(first.contains("Project-specific introduction."));
     assert!(first.contains("Guidance from the test provider."));
     assert!(first.contains("[Getting Started](.agents/context/docs-provider/getting-started.md)"));
+    assert!(first.contains("Set up a new Ruby gem using the project conventions."));
     assert!(first.contains("First paragraph."));
     assert!(!first.contains("Later details."));
     assert!(first.contains("## Commands\n\nKeep this section."));
@@ -222,4 +313,6 @@ fn registers_the_ruby_compatible_task_names() {
     assert!(names.contains(&"agent:context:show"));
     assert!(names.contains(&"agent:context:install"));
     assert!(names.contains(&"agent:context:agents-md"));
+    assert!(names.contains(&"agent:context:skill:list"));
+    assert!(names.contains(&"agent:context:skill:install"));
 }
