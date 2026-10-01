@@ -3,9 +3,11 @@
 
 mod index;
 mod installer;
+mod skill;
 
 pub use index::AgentIndex;
 pub use installer::{ContextFile, ContextPackage, Installer};
+pub use skill::{Skill, install_skills, list_skills};
 
 use bake::{Context, Error, Result};
 
@@ -87,6 +89,43 @@ pub fn install(context: &mut Context, package: Option<String>) -> Result<String>
         Ok("No dependency context was installed".to_owned())
     } else {
         Ok(format!("Installed context from: {}", installed.join(", ")))
+    }
+}
+
+/// List skills declared by dependency context documents.
+#[bake::task(name = "agent:context:skill:list")]
+pub fn skill_list(context: &mut Context, package: Option<String>) -> Result<String> {
+    let installer = installer(context)?;
+    let skills = list_skills(&installer, package.as_deref())?;
+    if skills.is_empty() {
+        return Ok("No dependency skills found".to_owned());
+    }
+
+    let mut output = String::from("Available dependency skills:");
+    for skill in skills {
+        output.push_str(&format!(
+            "\n  {} ({}) — {}",
+            skill.name,
+            skill.package_selector(),
+            skill.description
+        ));
+    }
+    Ok(output)
+}
+
+/// Install skills from all dependencies or select a crate and/or skill.
+#[bake::task(name = "agent:context:skill:install")]
+pub fn skill_install(
+    context: &mut Context,
+    package: Option<String>,
+    skill: Option<String>,
+) -> Result<String> {
+    let installer = installer(context)?;
+    let installed = install_skills(&installer, package.as_deref(), skill.as_deref())?;
+    if installed.is_empty() {
+        Ok("No dependency skills were installed".to_owned())
+    } else {
+        Ok(format!("Installed skills: {}", installed.join(", ")))
     }
 }
 

@@ -2,6 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use super::installer::{ContextPackage, markdown_files};
+use super::skill::frontmatter_description;
 use bake::{Error, Result};
 use socketry_markdown::{
     ParseOptions,
@@ -393,7 +394,8 @@ fn extract_content(path: &Path) -> Result<(String, Option<String>)> {
         Node::Paragraph(_) => Some(node.text_content()),
         _ => None,
     });
-    let description = first_paragraph.as_deref().and_then(first_sentence);
+    let description = frontmatter_description(&root, path)?
+        .or_else(|| first_paragraph.as_deref().and_then(first_sentence));
 
     Ok((title, description))
 }

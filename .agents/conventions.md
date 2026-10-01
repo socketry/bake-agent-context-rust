@@ -1,4 +1,4 @@
-# Repository Conventions
+# Conventions
 
 - Keep shared Rust guidance in `context/rust.md`; this file is for conventions specific to this repository.
 - Keep the public API and Cargo dependency discovery in `src/agent/context/`.
