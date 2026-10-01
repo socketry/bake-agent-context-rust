@@ -59,11 +59,11 @@ description: Set up a new Ruby gem using the project conventions.
 Follow the setup steps and use the bundled references when needed.
 ```
 
-The Markdown filename supplies the skill name, so `initial-gem-setup.md` becomes `initial-gem-setup/SKILL.md`. Files under the matching `context/initial-gem-setup/` directory are copied alongside it. Bake generates the required YAML `name` and `description` fields in `SKILL.md`.
+The Markdown filename supplies the skill name, so `initial-gem-setup.md` becomes `initial-gem-setup/SKILL.md`. Files under the matching `context/initial-gem-setup/` directory are copied alongside it as skill resources. Bake generates the required YAML `name` and `description` fields in `SKILL.md`. Skill documents and their resource directories are installed only under `.agents/skills/`; they are omitted from `.agents/context/` and the generated `agents.md` index.
 
 The supported front matter keys are `type` and `description`. The type must be `skill`; other types and unknown keys are rejected. There is no portable file-pattern field for skills, so describe the relevant tasks and files in `description`.
 
-Install skills explicitly with `cargo bake agent:context:skill:install`. With no options, it installs all discovered skills. Use `--package CRATE` to select one provider, `--skill NAME` to select one uniquely named skill, or both to select a skill from a specific crate. Run `cargo bake agent:context:skill:list` to discover available skills.
+Run `cargo bake agent:context:install` to install ordinary context and all discovered skills. Use `--package CRATE` to install both from one provider. For independent skill management, `cargo bake agent:context:skill:install` installs all skills by default; `--package CRATE` selects one provider, `--skill NAME` selects one uniquely named skill, and both select a skill from a specific crate. Run `cargo bake agent:context:skill:list` to discover available skills.
 
 Installed skills live under `.agents/skills/` and should be ignored by Git. Bake records ownership there so it can update dependency-provided skills without overwriting project-owned skills. Skill names are global within that directory; if multiple crates provide the same name, select one provider explicitly. Keep the companion assets directory free of a top-level `SKILL.md`, which Bake generates from the context document.
 

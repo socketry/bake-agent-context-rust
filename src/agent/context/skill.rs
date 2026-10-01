@@ -77,103 +77,7 @@ pub fn list_skills(installer: &Installer, package: Option<&str>) -> Result<Vec<S
 
     let mut skills = Vec::new();
     for package in packages {
-        let mut files = markdown_files(&package.context_path)?;
-        files.sort();
-
-        for source in files {
-            let contents = fs::read_to_string(&source).map_err(|error| {
-                Error::new(format!("cannot read {}: {error}", source.display()))
-            })?;
-            let mut options = ParseOptions::default();
-            options.constructs.frontmatter = true;
-            let mut document = to_mdast(&contents, &options).map_err(|error| {
-                Error::new(format!("could not parse {}: {error}", source.display()))
-            })?;
-
-            let Some(frontmatter) = context_frontmatter(&document, &source)? else {
-                continue;
-            };
-            let Some(document_type) = frontmatter.document_type else {
-                continue;
-            };
-            if document_type != "skill" {
-                return Err(Error::new(format!(
-                    "unsupported context type {document_type:?} in {}; supported type: skill",
-                    source.display()
-                )));
-            }
-
-            if source.parent() != Some(package.context_path.as_path()) {
-                return Err(Error::new(format!(
-                    "skill document {} must be directly inside context/",
-                    source.display()
-                )));
-            }
-
-            let name = source
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .ok_or_else(|| Error::new(format!("invalid skill filename: {}", source.display())))?
-                .to_owned();
-            validate_skill_name(&name)?;
-
-            let description = frontmatter
-                .description
-                .map(|description| description.trim().to_owned())
-                .filter(|description| !description.is_empty())
-                .ok_or_else(|| {
-                    Error::new(format!(
-                        "skill {} in crate {} requires a non-empty `description`",
-                        name, package.name
-                    ))
-                })?;
-            if description.chars().count() > 1024 {
-                return Err(Error::new(format!(
-                    "skill description for {name:?} exceeds the 1024 character limit"
-                )));
-            }
-
-            let assets = package.context_path.join(&name);
-            let assets = match fs::symlink_metadata(&assets) {
-                Ok(metadata) if metadata.file_type().is_dir() => Some(assets),
-                Ok(_) => {
-                    return Err(Error::new(format!(
-                        "skill assets path {} is not a directory",
-                        assets.display()
-                    )));
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                Err(error) => {
-                    return Err(Error::new(format!(
-                        "cannot inspect skill assets {}: {error}",
-                        assets.display()
-                    )));
-                }
-            };
-
-            let Some(children) = document.children_mut() else {
-                return Err(Error::new(format!(
-                    "{} is not a Markdown document",
-                    source.display()
-                )));
-            };
-            if !matches!(children.first(), Some(Node::Yaml(_))) {
-                return Err(Error::new(format!(
-                    "skill {} must use YAML front matter delimited by `---`",
-                    source.display()
-                )));
-            }
-            children.remove(0);
-            let body = document.to_markdown();
-
-            skills.push(Skill {
-                name,
-                description,
-                package: package.clone(),
-                assets,
-                body,
-            });
-        }
+        skills.extend(list_package_skills(&package)?);
     }
 
     skills.sort_by(|left, right| {
@@ -183,6 +87,108 @@ pub fn list_skills(installer: &Installer, package: Option<&str>) -> Result<Vec<S
             .then_with(|| left.package.version.cmp(&right.package.version))
             .then_with(|| left.name.cmp(&right.name))
     });
+    Ok(skills)
+}
+
+pub(crate) fn list_package_skills(package: &ContextPackage) -> Result<Vec<Skill>> {
+    let mut skills = Vec::new();
+    let mut files = markdown_files(&package.context_path)?;
+    files.sort();
+
+    for source in files {
+        let contents = fs::read_to_string(&source)
+            .map_err(|error| Error::new(format!("cannot read {}: {error}", source.display())))?;
+        let mut options = ParseOptions::default();
+        options.constructs.frontmatter = true;
+        let mut document = to_mdast(&contents, &options).map_err(|error| {
+            Error::new(format!("could not parse {}: {error}", source.display()))
+        })?;
+
+        let Some(frontmatter) = context_frontmatter(&document, &source)? else {
+            continue;
+        };
+        let Some(document_type) = frontmatter.document_type else {
+            continue;
+        };
+        if document_type != "skill" {
+            return Err(Error::new(format!(
+                "unsupported context type {document_type:?} in {}; supported type: skill",
+                source.display()
+            )));
+        }
+
+        if source.parent() != Some(package.context_path.as_path()) {
+            return Err(Error::new(format!(
+                "skill document {} must be directly inside context/",
+                source.display()
+            )));
+        }
+
+        let name = source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| Error::new(format!("invalid skill filename: {}", source.display())))?
+            .to_owned();
+        validate_skill_name(&name)?;
+
+        let description = frontmatter
+            .description
+            .map(|description| description.trim().to_owned())
+            .filter(|description| !description.is_empty())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "skill {} in crate {} requires a non-empty `description`",
+                    name, package.name
+                ))
+            })?;
+        if description.chars().count() > 1024 {
+            return Err(Error::new(format!(
+                "skill description for {name:?} exceeds the 1024 character limit"
+            )));
+        }
+
+        let assets = package.context_path.join(&name);
+        let assets = match fs::symlink_metadata(&assets) {
+            Ok(metadata) if metadata.file_type().is_dir() => Some(assets),
+            Ok(_) => {
+                return Err(Error::new(format!(
+                    "skill assets path {} is not a directory",
+                    assets.display()
+                )));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(Error::new(format!(
+                    "cannot inspect skill assets {}: {error}",
+                    assets.display()
+                )));
+            }
+        };
+
+        let Some(children) = document.children_mut() else {
+            return Err(Error::new(format!(
+                "{} is not a Markdown document",
+                source.display()
+            )));
+        };
+        if !matches!(children.first(), Some(Node::Yaml(_))) {
+            return Err(Error::new(format!(
+                "skill {} must use YAML front matter delimited by `---`",
+                source.display()
+            )));
+        }
+        children.remove(0);
+        let body = document.to_markdown();
+
+        skills.push(Skill {
+            name,
+            description,
+            package: package.clone(),
+            assets,
+            body,
+        });
+    }
+
     Ok(skills)
 }
 

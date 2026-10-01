@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Install dependency-provided Agent Skills from context documents with YAML front matter.
+- Install context and skills together with `agent:context:install`, keeping skill documents and resources out of the context index.
 
 ## v0.1.3
 

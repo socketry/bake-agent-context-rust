@@ -73,7 +73,7 @@ fn project() -> (TempDir, std::path::PathBuf) {
 }
 
 #[test]
-fn discovers_context_from_resolved_dependencies_and_lists_all_files() {
+fn lists_context_files_without_listing_skill_documents_or_assets() {
     let (_directory, root) = project();
     let manifest_path = root.join("Cargo.toml");
     let mut manifest = fs::read_to_string(&manifest_path).unwrap();
@@ -119,13 +119,7 @@ fn discovers_context_from_resolved_dependencies_and_lists_all_files() {
         .collect();
     assert_eq!(
         paths,
-        [
-            "example.json",
-            "getting-started.md",
-            "initial-gem-setup/references/checklist.md",
-            "initial-gem-setup.md",
-            "reference/usage.md"
-        ]
+        ["example.json", "getting-started.md", "reference/usage.md"]
     );
 }
 
@@ -206,8 +200,18 @@ fn skill_installation_does_not_overwrite_project_owned_skills() {
 #[test]
 fn installs_context_and_updates_agents_file_without_clobbering_other_sections() {
     let (_directory, root) = project();
-    let installer = Installer::new(&root).unwrap();
-    assert_eq!(installer.install_all().unwrap(), ["docs-provider"]);
+    write(
+        &root,
+        "agents.md",
+        "# Agent\n\nProject-specific introduction.\n\n## Context\n\nOld generated section.\n\n## Commands\n\nKeep this section.\n",
+    );
+
+    let output = Registry::discover()
+        .unwrap()
+        .run_arguments(&root, &["agent:context:install".to_owned()])
+        .unwrap();
+    assert!(output.contains("Installed context from: docs-provider"));
+    assert!(output.contains("Installed skills: initial-gem-setup (docs-provider)"));
 
     let installed = root.join(".agents/context/docs-provider");
     assert_eq!(
@@ -215,19 +219,18 @@ fn installs_context_and_updates_agents_file_without_clobbering_other_sections() 
         "# Usage\n\nNested usage guidance.\n"
     );
     assert!(!installed.join("index.yaml").exists());
-
-    write(
-        &root,
-        "agents.md",
-        "# Agent\n\nProject-specific introduction.\n\n## Context\n\nOld generated section.\n\n## Commands\n\nKeep this section.\n",
+    assert!(!installed.join("initial-gem-setup.md").exists());
+    assert!(!installed.join("initial-gem-setup").exists());
+    assert!(
+        root.join(".agents/skills/initial-gem-setup/SKILL.md")
+            .is_file()
     );
-    let index = AgentIndex::new(&root).with_packages(installer.packages());
-    index.update_agents_md("agents.md").unwrap();
+
     let first = fs::read_to_string(root.join("agents.md")).unwrap();
     assert!(first.contains("Project-specific introduction."));
     assert!(first.contains("Guidance from the test provider."));
     assert!(first.contains("[Getting Started](.agents/context/docs-provider/getting-started.md)"));
-    assert!(first.contains("Set up a new Ruby gem using the project conventions."));
+    assert!(!first.contains("Set up a new Ruby gem using the project conventions."));
     assert!(first.contains("First paragraph."));
     assert!(!first.contains("Later details."));
     assert!(first.contains("## Commands\n\nKeep this section."));

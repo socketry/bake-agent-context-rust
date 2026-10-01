@@ -20,7 +20,7 @@ fn main() -> bake::Result<()> {
 }
 ```
 
-Install context from all resolved dependencies and update `agents.md`:
+Install context and skills from all resolved dependencies and update `agents.md`:
 
 ```sh
 cargo bake agent:context:install
@@ -40,6 +40,8 @@ cargo bake agent:context:skill:install --package socketry-executor --skill initi
 ```
 
 Generated context and skill files are written to `.agents/context/` and `.agents/skills/`; ignore those directories in Git. Other files directly under `.agents/` may contain project-owned instructions. The generated `agents.md` is intended to be committed.
+
+Context documents marked with `type: skill` are installed only under `.agents/skills/`, along with their companion resources. They are omitted from `.agents/context/` and the generated `agents.md` index. Use `agent:context:install --package CRATE` to install both context and skills from one provider. The separate skill tasks are useful for listing skills or installing a selected skill.
 
 ## Provide context from a crate
 

@@ -32,6 +32,12 @@ pub fn list(context: &mut Context, package: Option<String>) -> Result<String> {
         };
 
         let files = installer.list_context_files(&package)?;
+        if files.is_empty() {
+            return Ok(format!(
+                "No context files found for crate '{}'.",
+                package.selector()
+            ));
+        }
         let mut output = format!("Context files for crate '{}':", package.selector());
         for file in files {
             output.push_str(&format!("\n  {}", file.path.display()));
@@ -39,9 +45,14 @@ pub fn list(context: &mut Context, package: Option<String>) -> Result<String> {
         return Ok(output);
     }
 
-    let packages = installer.packages();
+    let mut packages = Vec::new();
+    for package in installer.packages() {
+        if !installer.list_context_files(package)?.is_empty() {
+            packages.push(package);
+        }
+    }
     if packages.is_empty() {
-        return Ok("No Cargo dependencies with context found".to_owned());
+        return Ok("No dependency context files found".to_owned());
     }
 
     let mut output = String::from("Crates with context available:");
@@ -67,28 +78,40 @@ pub fn show(
     Ok(content)
 }
 
-/// Install one crate's context or all dependency context, then update agents.md.
+/// Install context and skills from one crate or all dependencies, then update agents.md.
 #[bake::task]
 pub fn install(context: &mut Context, package: Option<String>) -> Result<String> {
     let installer = installer(context)?;
-    let installed = if let Some(package) = package {
-        if installer.install_package(&package)? {
-            vec![package]
+    let installed_context = if let Some(package) = package.as_deref() {
+        if installer.install_package(package)? {
+            vec![package.to_owned()]
         } else {
             Vec::new()
         }
     } else {
         installer.install_all()?
     };
+    let installed_skills = install_skills(&installer, package.as_deref(), None)?;
 
     AgentIndex::new(context.root())
         .with_packages(installer.packages())
         .update_agents_md("agents.md")?;
 
-    if installed.is_empty() {
-        Ok("No dependency context was installed".to_owned())
+    let mut output = Vec::new();
+    if !installed_context.is_empty() {
+        output.push(format!(
+            "Installed context from: {}",
+            installed_context.join(", ")
+        ));
+    }
+    if !installed_skills.is_empty() {
+        output.push(format!("Installed skills: {}", installed_skills.join(", ")));
+    }
+
+    if output.is_empty() {
+        Ok("No dependency context or skills were installed".to_owned())
     } else {
-        Ok(format!("Installed context from: {}", installed.join(", ")))
+        Ok(output.join("\n"))
     }
 }
 
