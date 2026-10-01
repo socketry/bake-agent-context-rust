@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+- Parse context documents and update the generated index with the Markdown AST.
+
 ## v0.1.2
 
 - Create or update GitHub Releases after successful crates.io publication.

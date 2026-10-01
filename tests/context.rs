@@ -164,6 +164,13 @@ fn inserts_context_under_agent_heading_or_creates_agent_heading() {
     let new_heading = fs::read_to_string(root.join("agents.md")).unwrap();
     assert!(new_heading.starts_with("# Agent\n\n## Context\n"));
     assert!(new_heading.ends_with("Project notes without a heading.\n"));
+
+    let html = "<!--\n# Agent\n\n## Context\nOld context.\n-->\n";
+    write(&root, "agents.md", html);
+    index.update_agents_md("agents.md").unwrap();
+    let parsed_heading = fs::read_to_string(root.join("agents.md")).unwrap();
+    assert!(parsed_heading.starts_with("# Agent\n\n## Context\n"));
+    assert!(parsed_heading.contains(html));
 }
 
 #[test]
@@ -191,7 +198,7 @@ fn extracts_title_and_first_sentence_from_markdown() {
     write(
         &root.parent().unwrap().join("provider"),
         "context/reference/usage.md",
-        "# Nested usage\n\nRead the guide first. Then apply its examples.\n",
+        "<!--\n# Not a title\n-->\n\n# Nested usage\n\nRead the guide first. Then apply its examples.\n",
     );
 
     let installer = Installer::new(&root).unwrap();
