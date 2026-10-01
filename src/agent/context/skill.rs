@@ -15,9 +15,11 @@ const REGISTRY_FILE: &str = ".agent-context-skills.json";
 /// A skill declared by a Markdown file in a dependency's `context/` directory.
 #[derive(Clone, Debug)]
 pub struct Skill {
+    /// Globally unique installed name, prefixed with the provider crate name.
     pub name: String,
     pub description: String,
     pub package: ContextPackage,
+    pub(crate) source_name: String,
     assets: Option<PathBuf>,
     body: String,
 }
@@ -124,11 +126,15 @@ pub(crate) fn list_package_skills(package: &ContextPackage) -> Result<Vec<Skill>
             )));
         }
 
-        let name = source
+        let source_name = source
             .file_stem()
             .and_then(|stem| stem.to_str())
             .ok_or_else(|| Error::new(format!("invalid skill filename: {}", source.display())))?
             .to_owned();
+        validate_skill_name(&source_name)?;
+
+        let package_prefix = package.name.to_ascii_lowercase().replace('_', "-");
+        let name = format!("{package_prefix}-{source_name}");
         validate_skill_name(&name)?;
 
         let description = frontmatter
@@ -147,7 +153,7 @@ pub(crate) fn list_package_skills(package: &ContextPackage) -> Result<Vec<Skill>
             )));
         }
 
-        let assets = package.context_path.join(&name);
+        let assets = package.context_path.join(&source_name);
         let assets = match fs::symlink_metadata(&assets) {
             Ok(metadata) if metadata.file_type().is_dir() => Some(assets),
             Ok(_) => {
@@ -184,6 +190,7 @@ pub(crate) fn list_package_skills(package: &ContextPackage) -> Result<Vec<Skill>
             name,
             description,
             package: package.clone(),
+            source_name,
             assets,
             body,
         });

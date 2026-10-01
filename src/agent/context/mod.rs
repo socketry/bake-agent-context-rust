@@ -136,7 +136,7 @@ pub fn skill_list(context: &mut Context, package: Option<String>) -> Result<Stri
     Ok(output)
 }
 
-/// Install skills from all dependencies or select a crate and/or skill.
+/// Install skills from all dependencies or select a crate and/or package-prefixed skill name.
 #[bake::task(name = "agent:context:skill:install")]
 pub fn skill_install(
     context: &mut Context,

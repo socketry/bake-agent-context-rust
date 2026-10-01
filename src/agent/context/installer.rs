@@ -191,7 +191,7 @@ impl Installer {
     pub fn list_context_files(&self, package: &ContextPackage) -> Result<Vec<ContextFile>> {
         let skill_names: HashSet<_> = super::skill::list_package_skills(package)?
             .into_iter()
-            .map(|skill| skill.name)
+            .map(|skill| skill.source_name)
             .collect();
         let mut files = Vec::new();
         collect_files(&package.context_path, &mut files)?;
@@ -219,7 +219,7 @@ impl Installer {
 
         let skill_names: HashSet<_> = super::skill::list_package_skills(&package)?
             .into_iter()
-            .map(|skill| skill.name)
+            .map(|skill| skill.source_name)
             .collect();
         let context_root = package.context_path.canonicalize().map_err(|error| {
             Error::new(format!(
@@ -245,7 +245,7 @@ impl Installer {
             return Ok(false);
         };
         let skills = super::skill::list_package_skills(&package)?;
-        let skill_names: HashSet<_> = skills.into_iter().map(|skill| skill.name).collect();
+        let skill_names: HashSet<_> = skills.into_iter().map(|skill| skill.source_name).collect();
 
         fs::create_dir_all(&self.context_path).map_err(|error| {
             Error::new(format!(

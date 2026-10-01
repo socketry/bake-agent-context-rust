@@ -8,6 +8,8 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
+const INSTALLED_SKILL_NAME: &str = "docs-provider-initial-gem-setup";
+
 fn write(root: &Path, relative_path: &str, contents: &str) {
     let path = root.join(relative_path);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -130,7 +132,7 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     let skills = list_skills(&installer, None).unwrap();
 
     assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0].name, "initial-gem-setup");
+    assert_eq!(skills[0].name, INSTALLED_SKILL_NAME);
     assert_eq!(skills[0].package_selector(), "docs-provider");
     assert_eq!(
         skills[0].description,
@@ -138,15 +140,20 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     );
 
     assert_eq!(
-        install_skills(&installer, Some("docs-provider"), Some("initial-gem-setup")).unwrap(),
-        ["initial-gem-setup (docs-provider)"]
+        install_skills(
+            &installer,
+            Some("docs-provider"),
+            Some(INSTALLED_SKILL_NAME)
+        )
+        .unwrap(),
+        [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
     );
 
-    let skill_directory = root.join(".agents/skills/initial-gem-setup");
+    let skill_directory = root.join(".agents/skills").join(INSTALLED_SKILL_NAME);
     let skill_markdown = fs::read_to_string(skill_directory.join("SKILL.md")).unwrap();
-    assert!(skill_markdown.starts_with(
-        "---\nname: initial-gem-setup\ndescription: Set up a new Ruby gem using the project conventions.\n---\n\n"
-    ));
+    assert!(skill_markdown.starts_with(&format!(
+        "---\nname: {INSTALLED_SKILL_NAME}\ndescription: Set up a new Ruby gem using the project conventions.\n---\n\n"
+    )));
     assert!(skill_markdown.contains("# Initial Gem Setup"));
     assert_eq!(
         fs::read_to_string(skill_directory.join("references/checklist.md")).unwrap(),
@@ -180,7 +187,7 @@ fn skill_installation_does_not_overwrite_project_owned_skills() {
     let (_directory, root) = project();
     write(
         &root,
-        ".agents/skills/initial-gem-setup/SKILL.md",
+        &format!(".agents/skills/{INSTALLED_SKILL_NAME}/SKILL.md"),
         "Project-owned skill.\n",
     );
     let installer = Installer::new(&root).unwrap();
@@ -192,7 +199,12 @@ fn skill_installation_does_not_overwrite_project_owned_skills() {
             .contains("not managed by Bake Agent Context")
     );
     assert_eq!(
-        fs::read_to_string(root.join(".agents/skills/initial-gem-setup/SKILL.md")).unwrap(),
+        fs::read_to_string(
+            root.join(".agents/skills")
+                .join(INSTALLED_SKILL_NAME)
+                .join("SKILL.md")
+        )
+        .unwrap(),
         "Project-owned skill.\n"
     );
 }
@@ -211,7 +223,9 @@ fn installs_context_and_updates_agents_file_without_clobbering_other_sections() 
         .run_arguments(&root, &["agent:context:install".to_owned()])
         .unwrap();
     assert!(output.contains("Installed context from: docs-provider"));
-    assert!(output.contains("Installed skills: initial-gem-setup (docs-provider)"));
+    assert!(output.contains(&format!(
+        "Installed skills: {INSTALLED_SKILL_NAME} (docs-provider)"
+    )));
 
     let installed = root.join(".agents/context/docs-provider");
     assert_eq!(
@@ -222,7 +236,9 @@ fn installs_context_and_updates_agents_file_without_clobbering_other_sections() 
     assert!(!installed.join("initial-gem-setup.md").exists());
     assert!(!installed.join("initial-gem-setup").exists());
     assert!(
-        root.join(".agents/skills/initial-gem-setup/SKILL.md")
+        root.join(".agents/skills")
+            .join(INSTALLED_SKILL_NAME)
+            .join("SKILL.md")
             .is_file()
     );
 

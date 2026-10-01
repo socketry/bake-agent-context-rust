@@ -148,14 +148,16 @@ Common file names:
 A context provider may distribute an Agent Skill as a Markdown document directly
 inside `context/`. The document MUST use YAML front matter with `type: skill`
 and a non-empty `description`. Its filename, without the `.md` extension, is
-the skill name. A directory with the same name MAY contain skill resources.
+the local skill name. A directory with the same name MAY contain skill
+resources. Consumers MUST prefix the local name with the provider package name
+and a hyphen to produce the globally unique installed skill name.
 
 Consumers that support skills MUST install the document as
-`.agents/skills/<name>/SKILL.md`, with the skill's required `name` and
-`description` front matter. Files in the matching resource directory MUST be
-copied into that skill directory. Skill documents and their resources MUST NOT
-also be copied into `.agents/context/` or included in the generated context
-index.
+`.agents/skills/<package-name>-<local-name>/SKILL.md`, with the installed name
+and `description` in its front matter. Files in the matching resource directory
+MUST be copied into that skill directory. Skill documents and their resources
+MUST NOT also be copied into `.agents/context/` or included in the generated
+context index.
 
 ## 5. Discovery and Installation
 
