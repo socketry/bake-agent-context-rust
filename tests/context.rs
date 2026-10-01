@@ -236,6 +236,8 @@ fn installs_context_and_updates_agents_file_without_clobbering_other_sections() 
     assert!(first.contains("## Commands\n\nKeep this section."));
     assert!(!first.contains("Old generated section."));
 
+    let installer = Installer::new(&root).unwrap();
+    let index = AgentIndex::new(&root).with_packages(installer.packages());
     index.update_agents_md("agents.md").unwrap();
     assert_eq!(fs::read_to_string(root.join("agents.md")).unwrap(), first);
 }
