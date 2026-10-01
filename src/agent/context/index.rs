@@ -3,6 +3,11 @@
 
 use super::installer::{ContextPackage, markdown_files};
 use bake::{Error, Result};
+use socketry_markdown::{
+    ParseOptions,
+    mdast::{Heading, Link, Node, Paragraph, Text},
+    to_mdast,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +17,14 @@ struct ContextDocument {
     path: PathBuf,
     title: String,
     description: Option<String>,
+}
+
+struct SourceHeading {
+    index: usize,
+    level: u8,
+    title: String,
+    start: usize,
+    body_start: usize,
 }
 
 /// Manages the generated Context section in a project's agents.md file.
@@ -175,62 +188,112 @@ impl AgentIndex {
 }
 
 fn update_existing(contents: &str, context: &str) -> String {
-    let mut lines: Vec<String> = contents.lines().map(str::to_owned).collect();
-    let had_trailing_newline = contents.ends_with('\n');
-    let agent_heading = lines
+    let Ok(root) = to_mdast(contents, &ParseOptions::default()) else {
+        return contents.to_owned();
+    };
+    let Some(children) = root.children() else {
+        return contents.to_owned();
+    };
+    let headings: Vec<_> = children
         .iter()
-        .position(|line| line.trim().eq_ignore_ascii_case("# agent"));
-
-    let Some(agent_heading) = agent_heading else {
+        .enumerate()
+        .filter_map(|(index, node)| {
+            let Node::Heading(heading) = node else {
+                return None;
+            };
+            let position = node.position()?;
+            Some(SourceHeading {
+                index,
+                level: heading.depth,
+                title: heading_text(node),
+                start: position.start.offset,
+                body_start: after_heading_line(contents, position.end.offset),
+            })
+        })
+        .collect();
+    let Some(agent_heading) = headings
+        .iter()
+        .find(|heading| heading.level == 1 && heading.title.eq_ignore_ascii_case("agent"))
+    else {
         return format!("# Agent\n\n## Context\n\n{context}\n\n{contents}");
     };
 
-    let mut context_heading = None;
-    for (index, line) in lines.iter().enumerate().skip(agent_heading + 1) {
-        let trimmed = line.trim();
-        if heading_level(trimmed) == Some(1) {
-            break;
-        }
-        if trimmed.eq_ignore_ascii_case("## context") {
-            context_heading = Some(index);
-            break;
-        }
-    }
+    let agent_end_index = headings
+        .iter()
+        .find(|heading| heading.index > agent_heading.index && heading.level <= 1)
+        .map_or(children.len(), |heading| heading.index);
+    let context_heading = headings.iter().find(|heading| {
+        heading.index > agent_heading.index
+            && heading.index < agent_end_index
+            && heading.level == 2
+            && heading.title.eq_ignore_ascii_case("context")
+    });
 
-    let replacement: Vec<String> = std::iter::once("## Context".to_owned())
-        .chain(std::iter::once(String::new()))
-        .chain(context.lines().map(str::to_owned))
-        .collect();
+    let newline = if contents.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let context = context.replace("\r\n", "\n").replace('\n', newline);
+    let mut updated = String::with_capacity(contents.len() + context.len() + 32);
 
     if let Some(context_heading) = context_heading {
-        let end = (context_heading + 1..lines.len())
-            .find(|index| heading_level(lines[*index].trim()).is_some_and(|level| level <= 2))
-            .unwrap_or(lines.len());
-        lines.splice(context_heading..end, replacement);
+        let end = headings
+            .iter()
+            .find(|heading| heading.index > context_heading.index && heading.level <= 2)
+            .map_or(contents.len(), |heading| heading.start);
+        updated.push_str(&contents[..context_heading.start]);
+        updated.push_str("## Context");
+        updated.push_str(newline);
+        updated.push_str(newline);
+        updated.push_str(&context);
+        if end < contents.len() {
+            updated.push_str(newline);
+            updated.push_str(newline);
+        } else if contents.ends_with('\n') || !context.is_empty() {
+            updated.push_str(newline);
+        }
+        updated.push_str(&contents[end..]);
     } else {
-        lines.splice(
-            agent_heading + 1..agent_heading + 1,
-            std::iter::once(String::new()).chain(replacement),
-        );
+        updated.push_str(&contents[..agent_heading.body_start]);
+        updated.push_str(newline);
+        updated.push_str("## Context");
+        updated.push_str(newline);
+        updated.push_str(newline);
+        updated.push_str(&context);
+        if agent_heading.body_start < contents.len() {
+            updated.push_str(newline);
+            updated.push_str(newline);
+        } else if contents.ends_with('\n') || !context.is_empty() {
+            updated.push_str(newline);
+        }
+        updated.push_str(&contents[agent_heading.body_start..]);
     }
 
-    let mut updated = lines.join("\n");
-    if had_trailing_newline || !updated.is_empty() {
-        updated.push('\n');
-    }
     updated
 }
 
-fn heading_level(line: &str) -> Option<usize> {
-    let hashes = line
-        .chars()
-        .take_while(|character| *character == '#')
-        .count();
-    if (1..=6).contains(&hashes) && line.chars().nth(hashes).is_some_and(char::is_whitespace) {
-        Some(hashes)
+fn after_heading_line(contents: &str, offset: usize) -> usize {
+    let Some(rest) = contents.get(offset..) else {
+        return offset;
+    };
+
+    if rest.starts_with("\r\n") {
+        offset + 2
+    } else if rest.starts_with('\r') || rest.starts_with('\n') {
+        offset + 1
     } else {
-        None
+        offset
     }
+}
+
+fn heading_text(node: &Node) -> String {
+    let text = node.text_content();
+    text.strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .or_else(|| text.strip_suffix('\r'))
+        .unwrap_or(text.as_str())
+        .to_owned()
 }
 
 fn append_document(
@@ -240,14 +303,30 @@ fn append_document(
     title: &str,
     description: Option<&str>,
 ) {
-    sections.push(format!(
-        "#### [{}]({})",
-        title.replace(']', "\\]"),
-        markdown_link(&link_root.join(relative_path))
-    ));
+    let heading = Node::Heading(Heading {
+        children: vec![Node::Link(Link {
+            children: vec![Node::Text(Text {
+                value: title.to_owned(),
+                position: None,
+            })],
+            position: None,
+            url: markdown_link(&link_root.join(relative_path)),
+            title: None,
+        })],
+        position: None,
+        depth: 4,
+    });
+    sections.push(heading.to_markdown().trim_end().to_owned());
     sections.push(String::new());
     if let Some(description) = description.filter(|description| !description.is_empty()) {
-        sections.push(description.to_owned());
+        let paragraph = Node::Paragraph(Paragraph {
+            children: vec![Node::Text(Text {
+                value: description.to_owned(),
+                position: None,
+            })],
+            position: None,
+        });
+        sections.push(paragraph.to_markdown().trim_end().to_owned());
         sections.push(String::new());
     }
 }
@@ -287,13 +366,22 @@ fn canonical_order(path: &Path) -> (usize, String, String) {
 fn extract_content(path: &Path) -> Result<(String, Option<String>)> {
     let content = fs::read_to_string(path)
         .map_err(|error| Error::new(format!("cannot read {}: {error}", path.display())))?;
-    let lines: Vec<_> = content.lines().map(str::trim).collect();
-    let title = lines
+    let mut options = ParseOptions::default();
+    options.constructs.frontmatter = true;
+    let root = to_mdast(&content, &options)
+        .map_err(|error| Error::new(format!("could not parse {}: {error}", path.display())))?;
+    let children = root
+        .children()
+        .ok_or_else(|| Error::new(format!("{} is not a Markdown document", path.display())))?;
+    let title = children
         .iter()
-        .find_map(|line| {
-            heading_level(line).map(|_| line.trim_start_matches('#').trim().to_owned())
+        .find_map(|node| match node {
+            Node::Heading(_) => {
+                let title = heading_text(node);
+                (!title.trim().is_empty()).then_some(title)
+            }
+            _ => None,
         })
-        .filter(|title| !title.is_empty())
         .unwrap_or_else(|| {
             path.file_stem()
                 .and_then(|stem| stem.to_str())
@@ -301,16 +389,11 @@ fn extract_content(path: &Path) -> Result<(String, Option<String>)> {
                 .replace('-', " ")
         });
 
-    let first_paragraph = lines
-        .iter()
-        .copied()
-        .filter(|line| heading_level(line).is_none())
-        .skip_while(|line| line.is_empty())
-        .take_while(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let description = first_sentence(&first_paragraph);
+    let first_paragraph = children.iter().find_map(|node| match node {
+        Node::Paragraph(_) => Some(node.text_content()),
+        _ => None,
+    });
+    let description = first_paragraph.as_deref().and_then(first_sentence);
 
     Ok((title, description))
 }
