@@ -1,5 +1,10 @@
 # Releases
 
+## v0.1.5
+
+- Explain how to organize reusable package context and repository-only agent
+  instructions.
+
 ## v0.1.4
 
 - Install dependency-provided Agent Skills from context documents with YAML front matter.

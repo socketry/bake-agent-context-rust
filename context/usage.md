@@ -68,5 +68,7 @@ Run `cargo bake agent:context:install` to install ordinary context and all disco
 Installed skills live under `.agents/skills/` and should be ignored by Git. Bake records ownership there so it can update dependency-provided skills without overwriting project-owned skills. Skill names are global within that directory and are prefixed by the Cargo package name. If multiple versions of one crate provide the same skill, select one provider explicitly. Keep the companion assets directory free of a top-level `SKILL.md`, which Bake generates from the context document.
 
 See the [Agent Context Specification](specification.md) for the language-agnostic directory and installation conventions.
+See [Agent Context](agent-context.md) for guidance on separating package
+context from repository-only instructions.
 
 The provider's `context/` directory is source content and should be versioned with the crate. It is different from `.agents/context/`, which is a generated copy installed into a consumer project.
