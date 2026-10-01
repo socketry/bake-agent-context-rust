@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.1.3
 
 - Parse context documents and update the generated index with the Markdown AST.
 
