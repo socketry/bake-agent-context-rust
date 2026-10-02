@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Write the context index to `.agents/context/index.md` without creating or
+  modifying the repository owner's `agents.md`.
+- Install the usage guide as the `bake-agent-context-usage` skill.
 - Keep generated context and dependency-provided skills out of Git using local
   excludes, while allowing projects to track their own skills.
 

@@ -6,7 +6,7 @@ mod index;
 mod installer;
 mod skill;
 
-pub use index::AgentIndex;
+pub use index::ContextIndex;
 pub use installer::{ContextFile, ContextPackage, Installer};
 pub use skill::{Skill, install_skills, list_skills};
 
@@ -79,7 +79,7 @@ pub fn show(
     Ok(content)
 }
 
-/// Install context and skills from one crate or all dependencies, then update agents.md.
+/// Install context and skills from one crate or all dependencies, then update the context index.
 #[bake::task]
 pub fn install(context: &mut Context, package: Option<String>) -> Result<String> {
     let installer = installer(context)?;
@@ -94,9 +94,9 @@ pub fn install(context: &mut Context, package: Option<String>) -> Result<String>
     };
     let installed_skills = install_skills(&installer, package.as_deref(), None)?;
 
-    AgentIndex::new(context.root())
+    ContextIndex::new(context.root())
         .with_packages(installer.packages())
-        .update_agents_md("agents.md")?;
+        .update_index()?;
 
     let mut output = Vec::new();
     if !installed_context.is_empty() {
@@ -153,15 +153,12 @@ pub fn skill_install(
     }
 }
 
-/// Create or update the generated Context section in an agents.md file.
-#[bake::task(name = "agents-md")]
-pub fn agents_md(
-    context: &mut Context,
-    #[bake(default = "agents.md")] path: String,
-) -> Result<String> {
+/// Create or update `.agents/context/index.md` from installed context files.
+#[bake::task(name = "agent:context:index")]
+pub fn index(context: &mut Context) -> Result<String> {
     let installer = installer(context)?;
-    AgentIndex::new(context.root())
+    ContextIndex::new(context.root())
         .with_packages(installer.packages())
-        .update_agents_md(&path)?;
-    Ok(format!("Updated {path}"))
+        .update_index()?;
+    Ok("Updated .agents/context/index.md".to_owned())
 }

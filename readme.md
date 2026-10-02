@@ -20,10 +20,11 @@ fn main() -> bake::Result<()> {
 }
 ```
 
-Install context and skills from all resolved dependencies and update `agents.md`:
+Install context and skills from all resolved dependencies and update the generated context index:
 
 ```sh
 cargo bake agent:context:install
+cargo bake agent:context:index
 ```
 
 Other tasks:
@@ -33,15 +34,14 @@ cargo bake agent:context:list
 cargo bake agent:context:list --package socketry-executor
 cargo bake agent:context:show --package socketry-executor --file getting-started
 cargo bake agent:context:install --package socketry-executor
-cargo bake agent:context:agents-md
 cargo bake agent:context:skill:list
 cargo bake agent:context:skill:install
 cargo bake agent:context:skill:install --package socketry-executor --skill socketry-executor-initial-gem-setup
 ```
 
-`cargo bake agent:context:install` maintains a marked section in the local Git exclude file (`.git/info/exclude`) for generated context, the skill registry, and dependency-installed skill directories. These exclusions stay in the checkout and are not committed. Project-owned skill directories remain trackable. The generated `agents.md` is intended to be committed.
+`cargo bake agent:context:install` writes `.agents/context/index.md` and maintains a marked section in the local Git exclude file (`.git/info/exclude`) for generated context, the skill registry, and dependency-installed skill directories. These exclusions stay in the checkout and are not committed. Project-owned skill directories remain trackable. The task does not create or modify the repository owner's `agents.md`; a project can add a stable link to the generated index if desired.
 
-Context documents marked with `type: skill` are installed only under `.agents/skills/`, along with their companion resources. Their installed names are prefixed with the provider crate name, and they are omitted from `.agents/context/` and the generated `agents.md` index. Use `agent:context:install --package CRATE` to install both context and skills from one provider. The separate skill tasks are useful for listing skills or installing a selected skill. Project-owned skills can live in `.agents/skills/` and remain version controlled.
+Context documents marked with `type: skill` are installed only under `.agents/skills/`, along with their companion resources. Their installed names are prefixed with the provider crate name, and they are omitted from `.agents/context/` and its generated index. Use `agent:context:install --package CRATE` to install both context and skills from one provider. The separate skill tasks are useful for listing skills or installing a selected skill. Project-owned skills can live in `.agents/skills/` and remain version controlled.
 
 ## Provide context from a crate
 
@@ -55,7 +55,7 @@ my-crate/
 └── src/
 ```
 
-Bake Agent Context uses the crate description from `Cargo.toml` and extracts each Markdown file's title and first sentence for the generated `agents.md` section. Ordinary context files need no Markdown front matter. A context document can opt into skill installation with YAML front matter; see [Using and Providing Context](context/usage.md).
+Bake Agent Context uses the crate description from `Cargo.toml` and extracts each Markdown file's title and first sentence for `.agents/context/index.md`. Ordinary context files need no Markdown front matter. A context document can opt into skill installation with YAML front matter; see [Using and Providing Context](context/usage.md), which is installed as the `bake-agent-context-usage` skill.
 
 ## Context
 
@@ -81,4 +81,4 @@ Please open an issue or pull request on [GitHub](https://github.com/socketry/bak
 
 ### Agent Context
 
-Before contributing, read `agents.md` and the relevant context files it links. If `agents.md` is missing or out of date, run `cargo bake agent:context:install` to install context from dependencies and update the index.
+Before contributing, follow `agents.md` if present, then read relevant guides linked from `.agents/context/index.md` and apply any matching skills. If the index or context files are missing or out of date, run `cargo bake agent:context:install` to refresh them.
