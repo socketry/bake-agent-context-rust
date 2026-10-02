@@ -1,3 +1,8 @@
+---
+type: skill
+description: Use this skill to install and navigate agent context and skills provided by Cargo dependencies.
+---
+
 # Using and Providing Context
 
 Use Bake Agent Context to discover and install practical guidance shipped in dependency crates.
@@ -10,11 +15,11 @@ Run `cargo bake agent:context:list` to see available providers. Each provider is
 
 Run `cargo bake agent:context:list --package CRATE` to list one provider's files. Read a file without installing it using `cargo bake agent:context:show --package CRATE --file FILE`; the `.md` extension is optional for Markdown files. Install or refresh one provider with `cargo bake agent:context:install --package CRATE`.
 
-Run `cargo bake agent:context:install` to install or refresh context from all resolved dependencies. Files are copied under `.agents/context/SELECTOR/`, where the selector is the crate name or the displayed `crate@version` selector. The task updates the generated Context section in `agents.md`. The generated section links to Markdown files, using each file's first heading as its title and its first prose sentence as its summary.
+Run `cargo bake agent:context:install` to install or refresh context from all resolved dependencies. Files are copied under `.agents/context/SELECTOR/`, where the selector is the crate name or the displayed `crate@version` selector. The task writes `.agents/context/index.md`, linking to Markdown files using each file's first heading as its title and first prose sentence as its summary.
 
-The `.agents/context/` directory is generated. In a Git checkout, the install task maintains a marked block in `.git/info/exclude` for that directory, the skill ownership registry, and dependency-installed skill directories. These local rules are not committed, and project-owned skill directories remain trackable. Each checkout gets the rules when the install task runs. The lower-case `agents.md` file is intended to be committed. The task preserves project-specific sections in that file and replaces only its generated Context section. Do not edit files under `.agents/context/` or dependency-installed skill directories; reinstalling replaces them with the provider's files.
+The `.agents/context/` directory and its index are generated. In a Git checkout, the install task maintains a marked block in `.git/info/exclude` for that directory, the skill ownership registry, and dependency-installed skill directories. These local rules are not committed, and project-owned skill directories remain trackable. Each checkout gets the rules when the install task runs. Bake Agent Context does not create or modify the project's `agents.md`; repository owners can add a stable link to `.agents/context/index.md` if they want. Do not edit files under `.agents/context/` or dependency-installed skill directories; reinstalling replaces them with provider files.
 
-Use `cargo bake agent:context:agents-md` to refresh the Context section after changing installed files or dependency metadata without reinstalling files.
+Use `cargo bake agent:context:index` to refresh the index after changing installed files without reinstalling them.
 
 ## Provide context from a crate
 
@@ -32,7 +37,7 @@ my-crate/
 
 When `Cargo.toml` has an explicit `include` list, include `context/**` so the guides are present in the published crate. Bake Agent Context uses the crate's Cargo description as the package summary.
 
-Write focused, actionable guides with a clear first heading and a useful first sentence. The generated `agents.md` section uses those as the link title and summary. A YAML `description` in front matter takes precedence over the first sentence. Keep detailed examples and guidance in the context files themselves.
+Write focused, actionable guides with a clear first heading and a useful first sentence. The generated index uses those as the link title and summary. A YAML `description` in front matter takes precedence over the first sentence. Keep detailed examples and guidance in the context files themselves.
 
 ## Provide a skill from context
 
@@ -59,7 +64,7 @@ description: Set up a new Ruby gem using the project conventions.
 Follow the setup steps and use the bundled references when needed.
 ```
 
-The Markdown filename supplies the local skill name. Bake prefixes it with the Cargo package name, so `initial-gem-setup.md` in `my-crate` becomes `my-crate-initial-gem-setup/SKILL.md`. Files under the matching `context/initial-gem-setup/` directory are copied alongside it as skill resources. Bake generates the required YAML `name` and `description` fields in `SKILL.md`. Skill documents and their resource directories are installed only under `.agents/skills/`; they are omitted from `.agents/context/` and the generated `agents.md` index.
+The Markdown filename supplies the local skill name. Bake prefixes it with the Cargo package name, so `initial-gem-setup.md` in `my-crate` becomes `my-crate-initial-gem-setup/SKILL.md`. Files under the matching `context/initial-gem-setup/` directory are copied alongside it as skill resources. Bake generates the required YAML `name` and `description` fields in `SKILL.md`. Skill documents and their resource directories are installed only under `.agents/skills/`; they are omitted from `.agents/context/` and its index. In this crate, `context/usage.md` is installed as `bake-agent-context-usage/SKILL.md`.
 
 The supported front matter keys are `type` and `description`. The type must be `skill`; other types and unknown keys are rejected. There is no portable file-pattern field for skills, so describe the relevant tasks and files in `description`.
 
@@ -67,8 +72,6 @@ Run `cargo bake agent:context:install` to install ordinary context and all disco
 
 Installed skills live under `.agents/skills/`. Bake records ownership there so it can update dependency-provided skills without overwriting project-owned skills. The installer adds exact entries to `.git/info/exclude` for dependency-owned skill directories and the ownership registry; it does not ignore the whole `.agents/skills/` directory. Skill names are global within that directory and are prefixed by the Cargo package name. If multiple versions of one crate provide the same skill, select one provider explicitly. Keep the companion assets directory free of a top-level `SKILL.md`, which Bake generates from the context document.
 
-See the [Agent Context Specification](specification.md) for the language-agnostic directory and installation conventions.
-See [Agent Context](agent-context.md) for guidance on separating package
-context from repository-only instructions.
+See `.agents/context/index.md` for installed guidance from this and other providers, including the language-agnostic specification and recommendations for keeping package context separate from repository-owned instructions.
 
 The provider's `context/` directory is source content and should be versioned with the crate. It is different from `.agents/context/`, which is a generated copy installed into a consumer project.

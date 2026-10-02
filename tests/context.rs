@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use bake::Registry;
-use bake_agent_context::agent::context::{AgentIndex, Installer, install_skills, list_skills};
+use bake_agent_context::agent::context::{ContextIndex, Installer, install_skills, list_skills};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -204,6 +204,52 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
 }
 
 #[test]
+fn names_the_usage_skill_from_its_file_and_package() {
+    let (_directory, root) = project();
+    let provider = root.parent().unwrap().join("provider");
+    write(
+        &root,
+        "Cargo.toml",
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nbake-agent-context = { path = \"../provider\" }\n",
+    );
+    write(
+        &provider,
+        "Cargo.toml",
+        "[package]\nname = \"bake-agent-context\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+    );
+    write(
+        &provider,
+        "context/usage.md",
+        "---\ntype: skill\ndescription: Use this skill to install and navigate dependency context.\n---\n\n# Usage\n\nInstall context and follow the generated index.\n",
+    );
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = Command::new(cargo)
+        .args(["metadata", "--format-version", "1", "--manifest-path"])
+        .arg(root.join("Cargo.toml"))
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let installer = Installer::new(&root).unwrap();
+    let skills = list_skills(&installer, None).unwrap();
+    let usage = skills
+        .iter()
+        .find(|skill| skill.name == "bake-agent-context-usage")
+        .unwrap();
+
+    assert_eq!(
+        usage.description,
+        "Use this skill to install and navigate dependency context."
+    );
+}
+
+#[test]
 fn skill_installation_does_not_overwrite_project_owned_skills() {
     let (_directory, root) = project();
     write(
@@ -319,7 +365,7 @@ fn skill_installation_works_without_a_git_checkout() {
 }
 
 #[test]
-fn installs_context_and_updates_agents_file_without_clobbering_other_sections() {
+fn installs_context_and_updates_index_without_changing_agents_file() {
     let (_directory, root) = project();
     write(
         &root,
@@ -351,47 +397,47 @@ fn installs_context_and_updates_agents_file_without_clobbering_other_sections() 
             .is_file()
     );
 
-    let first = fs::read_to_string(root.join("agents.md")).unwrap();
-    assert!(first.contains("Project-specific introduction."));
+    let agents_file = fs::read_to_string(root.join("agents.md")).unwrap();
+    assert_eq!(
+        agents_file,
+        "# Agent\n\nProject-specific introduction.\n\n## Context\n\nOld generated section.\n\n## Commands\n\nKeep this section.\n"
+    );
+
+    let index_path = root.join(".agents/context/index.md");
+    let first = fs::read_to_string(&index_path).unwrap();
+    assert!(first.contains("# Context Index"));
+    assert!(first.contains("## docs-provider"));
     assert!(first.contains("Guidance from the test provider."));
-    assert!(first.contains("[Getting Started](.agents/context/docs-provider/getting-started.md)"));
+    assert!(first.contains("[Getting Started](docs-provider/getting-started.md)"));
     assert!(!first.contains("Set up a new Ruby gem using the project conventions."));
     assert!(first.contains("First paragraph."));
     assert!(!first.contains("Later details."));
-    assert!(first.contains("## Commands\n\nKeep this section."));
-    assert!(!first.contains("Old generated section."));
 
     let installer = Installer::new(&root).unwrap();
-    let index = AgentIndex::new(&root).with_packages(installer.packages());
-    index.update_agents_md("agents.md").unwrap();
-    assert_eq!(fs::read_to_string(root.join("agents.md")).unwrap(), first);
+    let index = ContextIndex::new(&root).with_packages(installer.packages());
+    index.update_index().unwrap();
+    assert_eq!(fs::read_to_string(index_path).unwrap(), first);
 }
 
 #[test]
-fn inserts_context_under_agent_heading_or_creates_agent_heading() {
+fn context_index_does_not_create_or_modify_agents_file() {
     let (_directory, root) = project();
     let installer = Installer::new(&root).unwrap();
     installer.install_all().unwrap();
-    let index = AgentIndex::new(&root);
+    let index = ContextIndex::new(&root);
 
-    write(&root, "agents.md", "# Agent\n\nProject guidance.\n");
-    index.update_agents_md("agents.md").unwrap();
-    let existing_heading = fs::read_to_string(root.join("agents.md")).unwrap();
-    assert!(existing_heading.contains("# Agent\n\n## Context\n"));
-    assert!(existing_heading.contains("Project guidance."));
+    assert!(!root.join("agents.md").exists());
+    index.update_index().unwrap();
+    assert!(!root.join("agents.md").exists());
+    assert!(root.join(".agents/context/index.md").is_file());
 
-    write(&root, "agents.md", "Project notes without a heading.\n");
-    index.update_agents_md("agents.md").unwrap();
-    let new_heading = fs::read_to_string(root.join("agents.md")).unwrap();
-    assert!(new_heading.starts_with("# Agent\n\n## Context\n"));
-    assert!(new_heading.ends_with("Project notes without a heading.\n"));
-
-    let html = "<!--\n# Agent\n\n## Context\nOld context.\n-->\n";
-    write(&root, "agents.md", html);
-    index.update_agents_md("agents.md").unwrap();
-    let parsed_heading = fs::read_to_string(root.join("agents.md")).unwrap();
-    assert!(parsed_heading.starts_with("# Agent\n\n## Context\n"));
-    assert!(parsed_heading.contains(html));
+    let agents_file = "# Agent\n\nOwner-maintained project guidance.\n";
+    write(&root, "agents.md", agents_file);
+    index.update_index().unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join("agents.md")).unwrap(),
+        agents_file
+    );
 }
 
 #[test]
@@ -425,11 +471,11 @@ fn extracts_title_and_first_sentence_from_markdown() {
     let installer = Installer::new(&root).unwrap();
     installer.install_all().unwrap();
 
-    let section = AgentIndex::new(&root)
+    let section = ContextIndex::new(&root)
         .with_packages(installer.packages())
-        .generate_context_section()
+        .generate_index()
         .unwrap();
-    assert!(section.contains("[Nested usage](.agents/context/docs-provider/reference/usage.md)"));
+    assert!(section.contains("[Nested usage](docs-provider/reference/usage.md)"));
     assert!(section.contains("Read the guide first."));
     assert!(!section.contains("Then apply its examples."));
 }
@@ -442,7 +488,8 @@ fn registers_the_ruby_compatible_task_names() {
     assert!(names.contains(&"agent:context:list"));
     assert!(names.contains(&"agent:context:show"));
     assert!(names.contains(&"agent:context:install"));
-    assert!(names.contains(&"agent:context:agents-md"));
+    assert!(names.contains(&"agent:context:index"));
+    assert!(!names.contains(&"agent:context:agents-md"));
     assert!(names.contains(&"agent:context:skill:list"));
     assert!(names.contains(&"agent:context:skill:install"));
 }
