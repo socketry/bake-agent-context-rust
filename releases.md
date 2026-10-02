@@ -1,5 +1,10 @@
 # Releases
 
+## Unreleased
+
+- Keep generated context and dependency-provided skills out of Git using local
+  excludes, while allowing projects to track their own skills.
+
 ## v0.1.5
 
 - Explain how to organize reusable package context and repository-only agent

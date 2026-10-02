@@ -83,7 +83,7 @@ Context consumers SHOULD create a `.agents/context/` directory in their project 
 - **Location**: Must be at the project root (typically where package manifests are located).
 - **Purpose**: Contains context files copied from dependencies.
 - **Organization**: Must organize context by package name in subdirectories.
-- **Exclusion**: The generated `.agents/context/` directory SHOULD be excluded from version control (e.g., in `.gitignore`). Other project-owned files may live directly under `.agents/`.
+- **Exclusion**: The generated `.agents/context/` directory SHOULD be excluded from version control. A Git integration SHOULD add local exclusions to `.git/info/exclude` so projects do not need to commit rules for generated files. Other project-owned files may live directly under `.agents/`.
 - **Transient Nature**: Should contain only reproducible content that can be regenerated from installed packages and MUST NOT contain unique or modified files.
 
 Example structure:
@@ -158,6 +158,14 @@ and `description` in its front matter. Files in the matching resource directory
 MUST be copied into that skill directory. Skill documents and their resources
 MUST NOT also be copied into `.agents/context/` or included in the generated
 context index.
+
+Dependency-installed skill directories SHOULD be excluded from version
+control, while project-owned skills in `.agents/skills/` SHOULD remain
+trackable. Git integrations SHOULD add exact dependency-installed skill paths
+to `.git/info/exclude` rather than ignore the entire `.agents/skills/`
+directory. They SHOULD mark generated entries with comments and preserve
+user-authored rules outside that marked section. Any generated skill
+ownership registry SHOULD also be excluded from version control.
 
 ## 5. Discovery and Installation
 
