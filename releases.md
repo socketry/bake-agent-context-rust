@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.2.0
 
 - Write the context index to `.agents/context/index.md` without creating or
   modifying the repository owner's `agents.md`.

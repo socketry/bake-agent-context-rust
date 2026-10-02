@@ -75,6 +75,31 @@ pull request. After review and merge, GitHub Actions publishes the release
 when the configured `crates-io` environment approves it. See the
 [Cargo publishing guide](https://github.com/socketry/bake-cargo-rust/blob/main/context/publishing.md).
 
+## Releases
+
+<!-- bake-readme:releases:start -->
+See [releases.md](releases.md) for the full release history.
+
+### v0.2.0
+
+- Write the context index to `.agents/context/index.md` without creating or
+  modifying the repository owner's `agents.md`.
+- Install the usage guide as the `bake-agent-context-usage` skill.
+- Keep generated context and dependency-provided skills out of Git using local
+  excludes, while allowing projects to track their own skills.
+
+### v0.1.5
+
+- Explain how to organize reusable package context and repository-only agent
+  instructions.
+
+### v0.1.4
+
+- Install dependency-provided Agent Skills from context documents with YAML front matter.
+- Install context and skills together with `agent:context:install`, keeping skill documents and resources out of the context index.
+- Prefix installed skill names with their provider's Cargo package name.
+<!-- bake-readme:releases:end -->
+
 ## Contributing
 
 Please open an issue or pull request on [GitHub](https://github.com/socketry/bake-agent-context-rust).
