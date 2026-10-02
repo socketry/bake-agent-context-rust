@@ -1,6 +1,7 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
+mod exclude;
 mod index;
 mod installer;
 mod skill;

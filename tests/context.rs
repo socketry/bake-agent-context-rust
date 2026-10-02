@@ -58,6 +58,17 @@ fn project() -> (TempDir, std::path::PathBuf) {
         "Run the project checks before publishing.\n",
     );
 
+    let output = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let output = Command::new(cargo)
         .args(["metadata", "--format-version", "1", "--manifest-path"])
@@ -149,6 +160,14 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
         [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
     );
 
+    let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
+    assert!(exclude.contains("# BEGIN bake-agent-context\n"));
+    assert!(exclude.contains("/.agents/context/\n"));
+    assert!(exclude.contains("/.agents/skills/.agent-context-skills.json\n"));
+    assert!(exclude.contains(&format!("/.agents/skills/{INSTALLED_SKILL_NAME}/\n")));
+    assert!(exclude.contains("# END bake-agent-context\n"));
+    assert!(!exclude.lines().any(|line| line == "/.agents/skills/"));
+
     let skill_directory = root.join(".agents/skills").join(INSTALLED_SKILL_NAME);
     let skill_markdown = fs::read_to_string(skill_directory.join("SKILL.md")).unwrap();
     assert!(skill_markdown.starts_with(&format!(
@@ -180,6 +199,8 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     .unwrap();
     assert!(install_skills(&installer, None, None).unwrap().is_empty());
     assert!(!skill_directory.exists());
+    let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
+    assert!(!exclude.contains(&format!("/.agents/skills/{INSTALLED_SKILL_NAME}/")));
 }
 
 #[test]
@@ -207,6 +228,94 @@ fn skill_installation_does_not_overwrite_project_owned_skills() {
         .unwrap(),
         "Project-owned skill.\n"
     );
+}
+
+#[test]
+fn maintains_local_excludes_without_hiding_project_owned_skills() {
+    let (_directory, root) = project();
+    let gitignore = "/target/\n# Project-specific ignore rules.\n";
+    write(&root, ".gitignore", gitignore);
+    write(
+        &root,
+        ".agents/skills/local-workflow/SKILL.md",
+        "Project-owned skill.\n",
+    );
+    write(&root, ".git/info/exclude", "# Local user rule\n*.local\n");
+    let installer = Installer::new(&root).unwrap();
+
+    install_skills(&installer, None, None).unwrap();
+
+    let actual_gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+    let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
+    assert_eq!(actual_gitignore, gitignore);
+    assert!(exclude.contains("/.agents/context/\n"));
+    assert!(exclude.contains("/.agents/skills/.agent-context-skills.json\n"));
+    assert!(exclude.contains(&format!("/.agents/skills/{INSTALLED_SKILL_NAME}/\n")));
+    assert!(exclude.contains("# Local user rule\n*.local\n"));
+    assert!(!exclude.lines().any(|line| line == "/.agents/skills/"));
+    assert!(!exclude.contains("/.agents/skills/local-workflow/"));
+    assert_eq!(
+        exclude
+            .lines()
+            .filter(|line| *line == "# BEGIN bake-agent-context")
+            .count(),
+        1
+    );
+    assert_eq!(
+        exclude
+            .lines()
+            .filter(|line| *line == "# END bake-agent-context")
+            .count(),
+        1
+    );
+
+    let generated_skill = Command::new("git")
+        .args([
+            "check-ignore",
+            "--quiet",
+            ".agents/skills/docs-provider-initial-gem-setup/SKILL.md",
+        ])
+        .current_dir(&root)
+        .status()
+        .unwrap();
+    assert!(generated_skill.success());
+    let project_skill = Command::new("git")
+        .args([
+            "check-ignore",
+            "--quiet",
+            ".agents/skills/local-workflow/SKILL.md",
+        ])
+        .current_dir(&root)
+        .status()
+        .unwrap();
+    assert_eq!(project_skill.code(), Some(1));
+
+    install_skills(&installer, None, None).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join(".git/info/exclude")).unwrap(),
+        exclude
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".gitignore")).unwrap(),
+        gitignore
+    );
+}
+
+#[test]
+fn skill_installation_works_without_a_git_checkout() {
+    let (_directory, root) = project();
+    fs::remove_dir_all(root.join(".git")).unwrap();
+    let installer = Installer::new(&root).unwrap();
+
+    install_skills(&installer, None, None).unwrap();
+
+    assert!(
+        root.join(".agents/skills")
+            .join(INSTALLED_SKILL_NAME)
+            .join("SKILL.md")
+            .is_file()
+    );
+    assert!(!root.join(".gitignore").exists());
 }
 
 #[test]

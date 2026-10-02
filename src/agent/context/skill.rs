@@ -327,6 +327,8 @@ pub fn install_skills(
     }
     let encoded_registry = serde_json::to_vec_pretty(&registry)
         .map_err(|error| Error::new(format!("cannot encode skill registry: {error}")))?;
+    let exclude_update =
+        super::exclude::prepare(installer.root(), registry.skills.keys().cloned())?;
 
     let stage = skills_root.join(format!(".agent-context-staging-{}", std::process::id()));
     fs::create_dir(&stage)
@@ -426,6 +428,9 @@ pub fn install_skills(
 
     fs::remove_dir_all(&stage)
         .map_err(|error| Error::new(format!("cannot remove {}: {error}", stage.display())))?;
+    if let Some(exclude_update) = exclude_update {
+        exclude_update.apply()?;
+    }
 
     Ok(skills
         .iter()

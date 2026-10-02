@@ -39,9 +39,9 @@ cargo bake agent:context:skill:install
 cargo bake agent:context:skill:install --package socketry-executor --skill socketry-executor-initial-gem-setup
 ```
 
-Generated context and skill files are written to `.agents/context/` and `.agents/skills/`; ignore those directories in Git. Other files directly under `.agents/` may contain project-owned instructions. The generated `agents.md` is intended to be committed.
+`cargo bake agent:context:install` maintains a marked section in the local Git exclude file (`.git/info/exclude`) for generated context, the skill registry, and dependency-installed skill directories. These exclusions stay in the checkout and are not committed. Project-owned skill directories remain trackable. The generated `agents.md` is intended to be committed.
 
-Context documents marked with `type: skill` are installed only under `.agents/skills/`, along with their companion resources. Their installed names are prefixed with the provider crate name, and they are omitted from `.agents/context/` and the generated `agents.md` index. Use `agent:context:install --package CRATE` to install both context and skills from one provider. The separate skill tasks are useful for listing skills or installing a selected skill.
+Context documents marked with `type: skill` are installed only under `.agents/skills/`, along with their companion resources. Their installed names are prefixed with the provider crate name, and they are omitted from `.agents/context/` and the generated `agents.md` index. Use `agent:context:install --package CRATE` to install both context and skills from one provider. The separate skill tasks are useful for listing skills or installing a selected skill. Project-owned skills can live in `.agents/skills/` and remain version controlled.
 
 ## Provide context from a crate
 

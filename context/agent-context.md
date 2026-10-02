@@ -32,10 +32,14 @@ instructions that should not ship to crate users. Do not put credentials or
 machine-specific private details in package context.
 
 Commit the lower-case `agents.md` file so agents have an entrypoint. It can
-contain project-owned instructions and the generated Context section. Add
-`.agents/context/` and `.agents/skills/` to `.gitignore`: both are installed
-from package sources and can be regenerated. Edit tracked package sources
-under `context/`, not generated copies under `.agents/`.
+contain project-owned instructions and the generated Context section.
+`cargo bake agent:context:install` maintains a marked block in the local Git
+exclude file (`.git/info/exclude`) for generated `.agents/context/` files, the
+skill ownership registry, and each dependency-installed skill directory. These
+rules stay in the local checkout instead of becoming project files. Project-
+owned skill directories remain trackable. Edit package skill sources under
+`context/` and repository-only skills under `.agents/skills/`, not generated
+dependency copies.
 
 ## Install and update
 

@@ -38,4 +38,4 @@ List skills provided by dependencies with `cargo bake agent:context:skill:list`.
 
 ## Generated files
 
-`.agents/context/` and `.agents/skills/` are generated and should be excluded from version control. Other files directly under `.agents/` may contain project-owned instructions. The lower-case `agents.md` file is the project-facing guide index; review it and commit it with the project.
+The install task maintains a marked block in the repository's local Git exclude file (`.git/info/exclude`) for generated `.agents/context/` files, the skill ownership registry, and dependency-installed skill directories. These local exclusions are not committed. Project-owned skill directories remain trackable. The lower-case `agents.md` file is the project-facing guide index; review it and commit it with the project.
