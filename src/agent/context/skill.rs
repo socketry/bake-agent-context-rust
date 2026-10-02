@@ -581,6 +581,12 @@ fn ensure_directory(path: &Path) -> Result<()> {
     }
 }
 
+pub(crate) fn installed_skill_names(root: &Path) -> Result<Vec<String>> {
+    let registry_path = root.join(".agents/skills").join(REGISTRY_FILE);
+    let registry = load_registry(&registry_path)?;
+    Ok(registry.skills.keys().cloned().collect())
+}
+
 fn load_registry(path: &Path) -> Result<Registry> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
