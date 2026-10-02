@@ -50,6 +50,7 @@ dependencies = [
  "bake-cargo",
  "bake-license",
  "bake-releases",
+ "socketry-project",
 ]
 
 [[package]]
@@ -90,6 +91,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bake-readme"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba0312a4bc6cad58620a16a58145fc19da4e3e6967300870fb1a8e5a7d6077d5"
+dependencies = [
+ "bake",
+ "serde_json",
+ "socketry-markdown",
+ "tempfile",
+]
+
+[[package]]
 name = "bake-releases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -97,6 +110,17 @@ checksum = "066f7e695fb0ce89445358a886ee2bf5eba7d10032f0ffb2527e774f6b567191"
 dependencies = [
  "bake",
  "tempfile",
+]
+
+[[package]]
+name = "bake-test-rust"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06aed9d2bfdbf373aafed3c05007a50547a21eefc1f1f739bb9d5c640788b14c"
+dependencies = [
+ "bake",
+ "serde_json",
+ "toml_edit",
 ]
 
 [[package]]
@@ -627,6 +651,21 @@ checksum = "cb6b36f84563d391bc2e67e1c8aef731a773acafd4bf4a9c97886f3771133610"
 dependencies = [
  "regex",
  "unicode-id",
+]
+
+[[package]]
+name = "socketry-project"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b87558b4520a9c41dff5a095b9c1a541aead57a13a7ea4dc72803bdd27ac089"
+dependencies = [
+ "bake",
+ "bake-agent-context",
+ "bake-cargo",
+ "bake-license",
+ "bake-readme",
+ "bake-releases",
+ "bake-test-rust",
 ]
 
 [[package]]
