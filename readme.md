@@ -72,13 +72,19 @@ This crate includes guides for its users and for other crate authors:
 Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`,
 or `bump --version X.Y.Z`), then run `cargo bake cargo:release` and open a
 pull request. After review and merge, GitHub Actions publishes the release
-when the configured `crates-io` environment approves it. See the
-[Cargo publishing guide](https://github.com/socketry/bake-cargo-rust/blob/main/context/publishing.md).
+when the configured `crates-io` environment approves it. Follow the shared
+[Releasing skill](https://github.com/socketry/socketry-project-rust/blob/main/context/releasing.md)
+for the standard process.
 
 ## Releases
 
 <!-- bake-readme:releases:start -->
 See [releases.md](releases.md) for the full release history.
+
+### v0.2.1
+
+- Use the shared `socketry-project` Releasing skill for the standard release
+  process and remove references to the duplicate Bake Cargo publishing context.
 
 ### v0.2.0
 
@@ -92,12 +98,6 @@ See [releases.md](releases.md) for the full release history.
 
 - Explain how to organize reusable package context and repository-only agent
   instructions.
-
-### v0.1.4
-
-- Install dependency-provided Agent Skills from context documents with YAML front matter.
-- Install context and skills together with `agent:context:install`, keeping skill documents and resources out of the context index.
-- Prefix installed skill names with their provider's Cargo package name.
 <!-- bake-readme:releases:end -->
 
 ## Contributing
