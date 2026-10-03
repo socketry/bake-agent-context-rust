@@ -114,9 +114,9 @@ dependencies = [
 
 [[package]]
 name = "bake-test-rust"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06aed9d2bfdbf373aafed3c05007a50547a21eefc1f1f739bb9d5c640788b14c"
+checksum = "700c1aca0c8e83c684ae294337a752bf909005b7a8b4bd3d7e11931a2556b2bb"
 dependencies = [
  "bake",
  "serde_json",
@@ -655,9 +655,9 @@ dependencies = [
 
 [[package]]
 name = "socketry-project"
-version = "0.2.6"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f1523b98fe0cac1ea6b466046f56b7a1d2822c97c334419783513417eb4a700"
+checksum = "247cda4e8404ab4fffb23a25d45c400b33890e493af0f722b1b69cd22e5ae7db"
 dependencies = [
  "bake",
  "bake-agent-context",
