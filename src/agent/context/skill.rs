@@ -1161,6 +1161,10 @@ mod tests {
 
         let blocker = directory.path().join("asset-parent-is-file");
         fs::write(&blocker, "file").unwrap();
+        let failure_path = blocker.join("skill");
+        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+            path == failure_path
+        });
         assert!(
             skill_assets_path(&blocker, "skill")
                 .err()
@@ -1507,8 +1511,13 @@ mod tests {
 
         let blocker = root.join("registry-parent-is-file");
         fs::write(&blocker, "file").unwrap();
+        let blocked_registry_path = blocker.join("registry.json");
+        let failure_path = blocked_registry_path.clone();
+        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+            path == failure_path
+        });
         assert!(
-            load_registry(&blocker.join("registry.json"))
+            load_registry(&blocked_registry_path)
                 .err()
                 .unwrap()
                 .to_string()
@@ -1519,8 +1528,17 @@ mod tests {
         assert!(!path_exists(&root.join("absent")).unwrap());
         let blocker = root.join("blocker");
         fs::write(&blocker, "file").unwrap();
-        assert!(path_exists(&blocker.join("child")).is_err());
-        assert!(remove_existing(&blocker.join("child")).is_err());
+        let child = blocker.join("child");
+        let failure_path = child.clone();
+        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+            path == failure_path
+        });
+        assert!(path_exists(&child).is_err());
+        let failure_path = child.clone();
+        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+            path == failure_path
+        });
+        assert!(remove_existing(&child).is_err());
         assert!(ensure_directory(&blocker).is_err());
         assert!(ensure_directory(&blocker.join("child")).is_err());
         let new_directory = root.join("new-directory");

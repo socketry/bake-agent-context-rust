@@ -742,6 +742,7 @@ mod tests {
         assert_eq!(installer.packages()[0].selector(), "valid");
     }
 
+    #[cfg(unix)]
     #[test]
     fn reports_context_provider_path_inspection_errors() {
         let directory = tempdir().unwrap();
@@ -1075,8 +1076,13 @@ mod tests {
         fs::create_dir(&folder).unwrap();
         remove_existing(&folder).unwrap();
         assert!(!folder.exists());
+    }
 
-        let blocker = root.join("blocker");
+    #[cfg(unix)]
+    #[test]
+    fn reports_removal_errors_for_paths_beneath_files() {
+        let directory = tempdir().unwrap();
+        let blocker = directory.path().join("blocker");
         fs::write(&blocker, "file").unwrap();
         assert!(remove_existing(&blocker.join("child")).is_err());
     }
