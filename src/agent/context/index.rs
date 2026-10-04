@@ -106,21 +106,16 @@ impl ContextIndex {
     /// Write the generated index without creating or modifying the project's `agents.md`.
     pub fn update_index(&self) -> Result<()> {
         let index = self.generate_index()?;
-        fs::create_dir_all(&self.context_path).map_err(|error| {
-            Error::new(format!(
-                "cannot create {}: {error}",
-                self.context_path.display()
-            ))
-        })?;
+        create_context_directory(&self.context_path)?;
 
         let path = self.context_path.join("index.md");
         fs::write(&path, index)
             .map_err(|error| Error::new(format!("cannot write {}: {error}", path.display())))?;
 
         let installed_skills = super::skill::installed_skill_names(&self.root)?;
-        if let Some(exclude_update) = super::exclude::prepare(&self.root, installed_skills)? {
-            exclude_update.apply()?;
-        }
+        super::exclude::prepare(&self.root, installed_skills)?
+            .map(|update| update.apply())
+            .transpose()?;
 
         Ok(())
     }
@@ -148,9 +143,7 @@ impl ContextIndex {
             let mut files = Vec::new();
             for path in markdown_files(&package_path)? {
                 let (title, description) = extract_content(&path)?;
-                let relative_path = path.strip_prefix(&package_path).map_err(|error| {
-                    Error::new(format!("cannot make context path relative: {error}"))
-                })?;
+                let relative_path = relative_context_path(&package_path, &path)?;
                 files.push(ContextDocument {
                     path: relative_path.to_path_buf(),
                     title,
@@ -165,6 +158,17 @@ impl ContextIndex {
         packages.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(packages)
     }
+}
+
+fn create_context_directory(path: &Path) -> Result<()> {
+    fs::create_dir_all(path)
+        .map_err(|error| Error::new(format!("cannot create {}: {error}", path.display())))
+}
+
+fn relative_context_path(package_path: &Path, path: &Path) -> Result<PathBuf> {
+    path.strip_prefix(package_path)
+        .map(Path::to_path_buf)
+        .map_err(|error| Error::new(format!("cannot make context path relative: {error}")))
 }
 
 fn append_document(
@@ -239,11 +243,12 @@ fn extract_content(path: &Path) -> Result<(String, Option<String>)> {
         .map_err(|error| Error::new(format!("cannot read {}: {error}", path.display())))?;
     let mut options = ParseOptions::default();
     options.constructs.frontmatter = true;
-    let root = to_mdast(&content, &options)
-        .map_err(|error| Error::new(format!("could not parse {}: {error}", path.display())))?;
+    // MDX parsing is disabled, so Markdown syntax cannot fail to parse.
+    let root =
+        to_mdast(&content, &options).expect("Markdown parsing without MDX support is infallible");
     let children = root
         .children()
-        .ok_or_else(|| Error::new(format!("{} is not a Markdown document", path.display())))?;
+        .expect("a Markdown document root always has children");
     let title = children
         .iter()
         .find_map(|node| match node {
@@ -304,4 +309,226 @@ fn path_to_string(path: &Path) -> String {
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn write(root: &Path, relative: &str, contents: &str) {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn exposes_context_path_and_renders_an_empty_index() {
+        let directory = tempdir().unwrap();
+        let index = ContextIndex::new(directory.path());
+
+        assert_eq!(
+            index.context_path(),
+            directory.path().join(".agents/context")
+        );
+        let rendered = index.generate_index().unwrap();
+        assert!(rendered.contains("No context files are installed."));
+        assert!(!rendered.ends_with('\n'));
+    }
+
+    #[test]
+    fn context_documents_use_fallback_titles_and_optional_descriptions() {
+        let directory = tempdir().unwrap();
+        write(
+            directory.path(),
+            ".agents/context/provider/no-heading.md",
+            "Text without a heading or punctuation\n",
+        );
+        write(
+            directory.path(),
+            ".agents/context/provider/blank.md",
+            "#   \n\n   \n",
+        );
+        write(
+            directory.path(),
+            ".agents/context/provider/metadata.md",
+            "---\ndescription:   \n---\n\n# Metadata\n\nBody sentence. More body.\n",
+        );
+
+        let rendered = ContextIndex::new(directory.path())
+            .generate_index()
+            .unwrap();
+        assert!(rendered.contains("[no heading](provider/no-heading.md)"));
+        assert!(rendered.contains("[blank](provider/blank.md)"));
+        assert!(rendered.contains("[Metadata](provider/metadata.md)"));
+        assert!(rendered.contains("Body sentence."));
+        assert!(!rendered.contains("More body."));
+    }
+
+    #[test]
+    fn package_descriptions_are_optional_and_packages_are_sorted() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        write(
+            root,
+            ".agents/context/zeta@1.0.0/guide.md",
+            "# Zeta\n\nZeta guidance.\n",
+        );
+        write(
+            root,
+            ".agents/context/alpha@1.0.0/guide.md",
+            "# Alpha\n\nAlpha guidance.\n",
+        );
+
+        let mut alpha = ContextPackage::for_test("alpha", "1.0.0", PathBuf::new());
+        alpha.description = None;
+        let zeta = ContextPackage::for_test("zeta", "1.0.0", PathBuf::new());
+        let rendered = ContextIndex::new(root)
+            .with_packages(&[zeta, alpha])
+            .generate_index()
+            .unwrap();
+
+        assert!(rendered.find("## alpha@1.0.0").unwrap() < rendered.find("## zeta@1.0.0").unwrap());
+        assert!(rendered.contains("Context files for alpha@1.0.0"));
+        assert!(rendered.contains("zeta documentation"));
+    }
+
+    #[test]
+    fn reports_context_read_and_markdown_parse_errors() {
+        let directory = tempdir().unwrap();
+        let error = extract_content(&directory.path().join("missing.md"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("cannot read"));
+
+        let directory = tempdir().unwrap();
+        let context_path = directory.path().join(".agents/context");
+        fs::create_dir_all(directory.path().join(".agents")).unwrap();
+        fs::write(&context_path, "not a directory").unwrap();
+        assert!(
+            ContextIndex::new(directory.path())
+                .generate_index()
+                .is_err()
+        );
+
+        let directory = tempdir().unwrap();
+        write(
+            directory.path(),
+            ".agents/context/provider/broken.md",
+            "---\ndescription: [unterminated\n---\n",
+        );
+        assert!(
+            ContextIndex::new(directory.path())
+                .generate_index()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn reports_index_directory_and_registry_errors() {
+        let directory = tempdir().unwrap();
+        let index = ContextIndex::new(directory.path());
+        fs::write(directory.path().join(".agents"), "not a directory").unwrap();
+        assert!(index.update_index().is_err());
+
+        let directory = tempdir().unwrap();
+        fs::create_dir_all(directory.path().join(".agents/context/index.md")).unwrap();
+        assert!(ContextIndex::new(directory.path()).update_index().is_err());
+
+        let directory = tempdir().unwrap();
+        fs::write(directory.path().join("blocker"), "not a directory").unwrap();
+        assert!(create_context_directory(&directory.path().join("blocker/context")).is_err());
+
+        let directory = tempdir().unwrap();
+        write(
+            directory.path(),
+            ".agents/skills/.agent-context-skills.json",
+            "{invalid json}",
+        );
+        assert!(ContextIndex::new(directory.path()).update_index().is_err());
+    }
+
+    #[test]
+    fn updates_local_git_excludes_with_the_generated_index() {
+        let directory = tempdir().unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        fs::write(directory.path().join(".git/info/exclude"), "# user rule\n").unwrap();
+        ContextIndex::new(directory.path()).update_index().unwrap();
+        let exclude = fs::read_to_string(directory.path().join(".git/info/exclude")).unwrap();
+        assert!(exclude.starts_with("# user rule\n"));
+        assert!(exclude.contains("# BEGIN bake-agent-context\n"));
+    }
+
+    #[test]
+    fn formats_links_and_orders_canonical_documents() {
+        assert_eq!(
+            markdown_link(Path::new("package/a% b#c?d(e).md")),
+            "package/a%25%20b%23c%3Fd%28e%29.md"
+        );
+        assert!(
+            canonical_order(Path::new("getting-started.md"))
+                < canonical_order(Path::new("unknown.md"))
+        );
+        assert!(
+            canonical_order(Path::new("other/usage.md"))
+                < canonical_order(Path::new("other/zeta.md"))
+        );
+        assert!(
+            canonical_order(Path::new("../Usage.md")) < canonical_order(Path::new("../zeta.md"))
+        );
+        assert_eq!(
+            path_to_string(Path::new("provider/reference/guide.md")),
+            "provider/reference/guide.md"
+        );
+    }
+
+    #[test]
+    fn extracts_sentences_and_handles_markdown_heading_newlines() {
+        assert_eq!(
+            first_sentence("  Start here! Later  "),
+            Some("Start here!".to_owned())
+        );
+        assert_eq!(
+            first_sentence("Question? Then answer."),
+            Some("Question?".to_owned())
+        );
+        assert_eq!(
+            first_sentence("No punctuation"),
+            Some("No punctuation".to_owned())
+        );
+        assert_eq!(first_sentence("  \n"), None);
+
+        for (value, expected) in [
+            ("title\r\n", "title"),
+            ("title\r", "title"),
+            ("title\n", "title"),
+        ] {
+            let heading = Node::Heading(Heading {
+                children: vec![Node::Text(Text {
+                    value: value.to_owned(),
+                    position: None,
+                })],
+                position: None,
+                depth: 1,
+            });
+            assert_eq!(heading_text(&heading), expected);
+        }
+    }
+
+    #[test]
+    fn reports_relative_path_invariant_violations() {
+        let directory = tempdir().unwrap();
+        let package = directory.path().join("provider");
+        assert!(relative_context_path(&package, &directory.path().join("outside.md")).is_err());
+        assert_eq!(
+            relative_context_path(&package, &package.join("guide.md")).unwrap(),
+            PathBuf::from("guide.md")
+        );
+    }
 }
