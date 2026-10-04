@@ -81,6 +81,12 @@ for the standard process.
 <!-- bake-readme:releases:start -->
 See [releases.md](releases.md) for the full release history.
 
+### v0.3.0
+
+- Expose the context API and Bake task adapters from the crate root, removing
+  the redundant `agent::context` path while preserving all `agent:context:*` tasks.
+- Keep the private task executable on compatible Bake 0.x and current task-library releases.
+
 ### v0.2.2
 
 - Declare compatibility with the Bake 0.x API so task libraries can share one task registry
@@ -90,14 +96,6 @@ See [releases.md](releases.md) for the full release history.
 
 - Use the shared `socketry-project` Releasing skill for the standard release
   process and remove references to the duplicate Bake Cargo publishing context.
-
-### v0.2.0
-
-- Write the context index to `.agents/context/index.md` without creating or
-  modifying the repository owner's `agents.md`.
-- Install the usage guide as the `bake-agent-context-usage` skill.
-- Keep generated context and dependency-provided skills out of Git using local
-  excludes, while allowing projects to track their own skills.
 <!-- bake-readme:releases:end -->
 
 ## Contributing
