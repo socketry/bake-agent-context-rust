@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use bake::Registry;
-use bake_agent_context::agent::context::{ContextIndex, Installer, install_skills, list_skills};
+use bake_agent_context::{ContextIndex, Installer, install_skills, list_skills};
 use std::fs;
 use std::path::Path;
 use std::process::Command;

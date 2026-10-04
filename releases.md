@@ -1,10 +1,15 @@
 # Releases
 
+## Unreleased
+
+- Expose the context API and Bake task adapters from the crate root, removing
+  the redundant `agent::context` path while preserving all `agent:context:*` tasks.
+- Keep the private task executable on compatible Bake 0.x and current task-library releases.
+
 ## v0.2.2
 
 - Declare compatibility with the Bake 0.x API so task libraries can share one task registry
   when upgrading to crate-derived task namespaces.
-
 
 ## v0.2.1
 
