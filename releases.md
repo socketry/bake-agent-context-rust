@@ -1,6 +1,9 @@
 # Releases
 
-## Unreleased
+## v0.2.2
+
+- Declare compatibility with the Bake 0.x API so task libraries can share one task registry
+  when upgrading to crate-derived task namespaces.
 
 
 ## v0.2.1

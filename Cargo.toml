@@ -1,6 +1,6 @@
 [package]
 name = "bake-agent-context"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/socketry/bake-agent-context-rust"
@@ -22,7 +22,7 @@ reviewers = ["socketry/managers"]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
 
 [dependencies]
-bake = "0.17.0"
+bake = "0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml_ng = "0.10"
