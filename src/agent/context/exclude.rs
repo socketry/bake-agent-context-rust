@@ -3,6 +3,7 @@
 
 use bake::{Error, Result};
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -50,7 +51,11 @@ pub(crate) fn prepare(
 }
 
 fn local_exclude_path(root: &Path) -> Result<Option<PathBuf>> {
-    let output = match Command::new("git")
+    local_exclude_path_with(root, OsStr::new("git"))
+}
+
+fn local_exclude_path_with(root: &Path, executable: &OsStr) -> Result<Option<PathBuf>> {
+    let output = match Command::new(executable)
         .args(["rev-parse", "--git-path", "info/exclude"])
         .current_dir(root)
         .output()
@@ -70,7 +75,17 @@ fn local_exclude_path(root: &Path) -> Result<Option<PathBuf>> {
         return Ok(None);
     }
 
-    let path = String::from_utf8(output.stdout)
+    exclude_path_from_output(root, output.status.success(), &output.stdout)
+}
+
+fn exclude_path_from_output(root: &Path, success: bool, stdout: &[u8]) -> Result<Option<PathBuf>> {
+    if !success {
+        // Context can still be installed from a source archive or other
+        // directory which is not a Git checkout.
+        return Ok(None);
+    }
+
+    let path = String::from_utf8(stdout.to_vec())
         .map_err(|error| Error::new(format!("Git returned an invalid exclude path: {error}")))?;
     let path = PathBuf::from(path.trim());
     Ok(Some(if path.is_absolute() {
@@ -96,9 +111,6 @@ fn prepare_local_exclude(path: PathBuf, skill_names: &BTreeSet<String>) -> Resul
         .lines()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    while lines.last().is_some_and(|line| line.is_empty()) {
-        lines.pop();
-    }
     if !lines.is_empty() {
         lines.push(String::new());
     }
@@ -165,5 +177,156 @@ fn remove_managed_block(contents: &str, path: &Path) -> Result<String> {
         let mut output = lines.join("\n");
         output.push('\n');
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn update_apply_is_idempotent_and_reports_parent_and_write_errors() {
+        let directory = tempdir().unwrap();
+        let unchanged = directory.path().join("unchanged");
+        Update {
+            path: unchanged.clone(),
+            original: "same".to_owned(),
+            updated: "same".to_owned(),
+        }
+        .apply()
+        .unwrap();
+        assert!(!unchanged.exists());
+
+        let parent_file = directory.path().join("file");
+        fs::write(&parent_file, "not a directory").unwrap();
+        let error = Update {
+            path: parent_file.join("exclude"),
+            original: String::new(),
+            updated: "generated\n".to_owned(),
+        }
+        .apply()
+        .unwrap_err();
+        assert!(error.to_string().contains("cannot create"));
+
+        let destination = directory.path().join("directory");
+        fs::create_dir(&destination).unwrap();
+        let error = Update {
+            path: destination.clone(),
+            original: "old".to_owned(),
+            updated: "new".to_owned(),
+        }
+        .apply()
+        .unwrap_err();
+        assert!(error.to_string().contains("cannot update"));
+
+        let error = Update {
+            path: PathBuf::new(),
+            original: "old".to_owned(),
+            updated: "new".to_owned(),
+        }
+        .apply()
+        .unwrap_err();
+        assert!(error.to_string().contains("cannot update"));
+    }
+
+    #[test]
+    fn resolves_git_output_and_rejects_invalid_utf8() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+
+        assert_eq!(
+            exclude_path_from_output(root, false, b"ignored").unwrap(),
+            None
+        );
+        assert_eq!(
+            exclude_path_from_output(root, true, b".git/info/exclude\n").unwrap(),
+            Some(root.join(".git/info/exclude"))
+        );
+        let absolute = root.join("exclude");
+        assert_eq!(
+            exclude_path_from_output(root, true, absolute.to_str().unwrap().as_bytes()).unwrap(),
+            Some(absolute)
+        );
+        assert!(exclude_path_from_output(root, true, &[0xff]).is_err());
+    }
+
+    #[test]
+    fn prepares_and_applies_managed_rules_without_losing_user_rules() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("exclude");
+        let original = "# user rule\n*.local\n\n";
+        fs::write(&path, original).unwrap();
+
+        let update = prepare_local_exclude(
+            path.clone(),
+            &BTreeSet::from(["zeta-skill".to_owned(), "alpha-skill".to_owned()]),
+        )
+        .unwrap();
+        update.apply().unwrap();
+        let result = fs::read_to_string(&path).unwrap();
+        assert!(result.starts_with("# user rule\n*.local\n\n# BEGIN bake-agent-context\n"));
+        assert!(result.find("alpha-skill").unwrap() < result.find("zeta-skill").unwrap());
+
+        let repeated = prepare_local_exclude(
+            path.clone(),
+            &BTreeSet::from(["alpha-skill".to_owned(), "zeta-skill".to_owned()]),
+        )
+        .unwrap();
+        repeated.apply().unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), result);
+    }
+
+    #[test]
+    fn handles_empty_exclude_files_and_rejects_broken_managed_blocks() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("exclude");
+
+        let empty = prepare_local_exclude(path.clone(), &BTreeSet::new()).unwrap();
+        empty.apply().unwrap();
+        let just_block = fs::read_to_string(&path).unwrap();
+        assert!(just_block.starts_with(BEGIN_MARKER));
+
+        for contents in [
+            BEGIN_MARKER.to_owned(),
+            END_MARKER.to_owned(),
+            format!("{END_MARKER}\n{BEGIN_MARKER}\n"),
+            format!("{BEGIN_MARKER}\n{END_MARKER}\n{BEGIN_MARKER}\n{END_MARKER}\n"),
+        ] {
+            assert!(
+                remove_managed_block(&contents, &path).is_err(),
+                "{contents:?}"
+            );
+        }
+        assert_eq!(
+            remove_managed_block(&format!("{BEGIN_MARKER}\n{END_MARKER}\n"), &path).unwrap(),
+            ""
+        );
+        assert_eq!(remove_managed_block("user\n\n", &path).unwrap(), "user\n");
+    }
+
+    #[test]
+    fn reports_exclude_read_errors() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("exclude-directory");
+        fs::create_dir(&path).unwrap();
+
+        let error = prepare_local_exclude(path, &BTreeSet::new()).err().unwrap();
+        assert!(error.to_string().contains("cannot read"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handles_git_command_start_errors() {
+        let directory = tempdir().unwrap();
+        assert_eq!(
+            local_exclude_path_with(directory.path(), OsStr::new("missing-git-executable"))
+                .unwrap(),
+            None
+        );
+        let error = local_exclude_path_with(directory.path(), directory.path().as_os_str())
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("cannot locate Git exclude file"));
     }
 }

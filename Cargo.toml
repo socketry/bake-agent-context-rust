@@ -18,6 +18,9 @@ manifest = "bake/Cargo.toml"
 [workspace.metadata.bake.release]
 reviewers = ["socketry/managers"]
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+
 [dependencies]
 bake = "0.17.0"
 serde = { version = "1.0", features = ["derive"] }
