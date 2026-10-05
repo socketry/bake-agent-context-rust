@@ -1,9 +1,12 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
+#[cfg(test)]
+use super::test_filesystem as fs;
 use bake::{Error, Result};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
+#[cfg(not(test))]
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,7 +45,33 @@ pub(crate) fn prepare(
     root: &Path,
     skill_names: impl IntoIterator<Item = String>,
 ) -> Result<Option<Update>> {
-    let Some(path) = local_exclude_path(root)? else {
+    prepare_with_locator(root, skill_names, local_exclude_path)
+}
+
+#[cfg(all(test, unix))]
+fn prepare_with_executable(
+    root: &Path,
+    skill_names: impl IntoIterator<Item = String>,
+    executable: &OsStr,
+) -> Result<Option<Update>> {
+    prepare_with_locator(root, skill_names, |root| {
+        local_exclude_path_with(root, executable)
+    })
+}
+
+fn prepare_with_locator(
+    root: &Path,
+    skill_names: impl IntoIterator<Item = String>,
+    locate: impl FnOnce(&Path) -> Result<Option<PathBuf>>,
+) -> Result<Option<Update>> {
+    prepare_from_path(locate(root)?, skill_names)
+}
+
+fn prepare_from_path(
+    path: Option<PathBuf>,
+    skill_names: impl IntoIterator<Item = String>,
+) -> Result<Option<Update>> {
+    let Some(path) = path else {
         return Ok(None);
     };
 
@@ -313,6 +342,41 @@ mod tests {
 
         let error = prepare_local_exclude(path, &BTreeSet::new()).err().unwrap();
         assert!(error.to_string().contains("cannot read"));
+    }
+
+    #[test]
+    fn propagates_git_lookup_and_managed_block_errors_from_prepare() {
+        let directory = tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            let executable = directory.path().join("not-executable");
+            fs::write(&executable, "not a command").unwrap();
+            let error = prepare_with_executable(
+                directory.path(),
+                Vec::<String>::new(),
+                executable.as_os_str(),
+            )
+            .err()
+            .unwrap();
+            assert!(error.to_string().contains("cannot locate Git exclude file"));
+        }
+
+        let error = prepare_with_locator(directory.path(), Vec::<String>::new(), |_| {
+            Err(Error::new("injected Git lookup failure"))
+        })
+        .err()
+        .unwrap();
+        assert!(error.to_string().contains("injected Git lookup failure"));
+
+        let repository = tempdir().unwrap();
+        let output = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(repository.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        fs::write(repository.path().join(".git/info/exclude"), BEGIN_MARKER).unwrap();
+        assert!(prepare(repository.path(), Vec::<String>::new()).is_err());
     }
 
     #[cfg(unix)]
