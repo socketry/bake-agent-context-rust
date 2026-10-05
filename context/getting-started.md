@@ -4,23 +4,16 @@ This guide shows how to add Bake Agent Context tasks to a Rust project and insta
 
 ## Add the Bake tasks
 
-Bake tasks belong in your project's private `bake/` crate. Add the Bake task library and Bake Agent Context to `bake/Cargo.toml`:
+Bake tasks belong in your project's private `bake/` crate. Bootstrap the task package, add Bake Agent Context, and regenerate the task links:
 
-```toml
-[dependencies]
-bake = "0.19"
-bake-agent-context = "0.3"
+```sh
+cargo install socketry-cargo-bake --locked
+cargo bake --regenerate
+cargo add --manifest-path bake/Cargo.toml bake-agent-context
+cargo bake --regenerate
 ```
 
-Link the task library from `bake/src/main.rs` and run the discovered task registry:
-
-```rust,ignore
-use bake_agent_context as _;
-
-fn main() -> bake::Result<()> {
-    bake::Registry::discover()?.run()
-}
-```
+Regeneration links the dependency's task registrations while preserving your task source; no manual import is needed.
 
 ## Install dependency context
 

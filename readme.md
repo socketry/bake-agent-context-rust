@@ -1,23 +1,15 @@
-# Bake Agent Context
+# `bake-agent-context`
 
 Bake tasks for discovering and installing context files shipped by Cargo dependencies. It is the Rust counterpart to the Ruby [`agent-context`](https://github.com/socketry/agent-context) gem.
 
 ## Setup
 
-Add the task library to the unpublished `bake/` crate in your project, then link it once from that crate's `main.rs`:
+Add the task library to the unpublished `bake/` crate and regenerate its task links:
 
-```toml
-[dependencies]
-bake = "0.19"
-bake-agent-context = "0.3"
-```
-
-```rust,ignore
-use bake_agent_context as _;
-
-fn main() -> bake::Result<()> {
-    bake::Registry::discover()?.run()
-}
+```sh
+cargo bake --regenerate
+cargo add --manifest-path bake/Cargo.toml bake-agent-context
+cargo bake --regenerate
 ```
 
 Install context and skills from all resolved dependencies and update the generated context index:
@@ -93,6 +85,11 @@ See [releases.md](releases.md) for the full release history.
 - Keep the private task executable on compatible Bake 0.x and current task-library releases.
 
 <!-- bake-readme:releases:end -->
+
+## See Also
+
+- [`bake`](https://github.com/socketry/bake-rust).
+- [`socketry-project`](https://github.com/socketry/socketry-project-rust).
 
 ## Contributing
 

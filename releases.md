@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+- Use Cargo-selected dependency versions and generated task links in setup instructions.
+
 ## v0.3.2
 
 - Adopt `socketry-project` 0.3.7 for shared project tasks and Markdown normalization.
