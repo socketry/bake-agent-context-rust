@@ -1,9 +1,9 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
-#[cfg(test)]
-use self::test_filesystem as filesystem;
 use super::installer::{ContextPackage, Installer, markdown_files};
+#[cfg(test)]
+use super::test_filesystem as filesystem;
 use bake::{Error, Result};
 use serde::{Deserialize, Serialize};
 use socketry_markdown::{ParseOptions, mdast::Node, to_mdast};
@@ -17,146 +17,6 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 const REGISTRY_VERSION: u32 = 1;
 const REGISTRY_FILE: &str = ".agent-context-skills.json";
 static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-#[cfg(test)]
-mod test_filesystem {
-    use std::io;
-    use std::path::Path;
-    use std::sync::Mutex;
-    use std::thread::ThreadId;
-
-    pub(super) use std::fs::{Metadata, copy, read_to_string, remove_file};
-
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    pub(super) enum Operation {
-        CreateDirectory,
-        CreateDirectoryTree,
-        Inspect,
-        Read,
-        ReadDirectoryEntry,
-        RenameSource,
-        RenameDestination,
-        RemoveDirectoryTree,
-        Write,
-    }
-
-    struct Failure {
-        operation: Operation,
-        thread: ThreadId,
-        matches: Box<dyn Fn(&Path) -> bool + Send + Sync>,
-    }
-
-    static FAILURES: Mutex<Vec<Failure>> = Mutex::new(Vec::new());
-
-    pub(super) struct FailureGuard {
-        thread: ThreadId,
-    }
-
-    impl Drop for FailureGuard {
-        fn drop(&mut self) {
-            FAILURES
-                .lock()
-                .unwrap()
-                .retain(|failure| failure.thread != self.thread);
-        }
-    }
-
-    pub(super) fn fail_once(
-        operation: Operation,
-        matches: impl Fn(&Path) -> bool + Send + Sync + 'static,
-    ) -> FailureGuard {
-        let thread = std::thread::current().id();
-        FAILURES.lock().unwrap().push(Failure {
-            operation,
-            thread,
-            matches: Box::new(matches),
-        });
-        FailureGuard { thread }
-    }
-
-    fn check_failure(operation: Operation, path: &Path) -> io::Result<()> {
-        if take_failure(operation, path) {
-            Err(io::Error::other("injected filesystem failure"))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn take_failure(operation: Operation, path: &Path) -> bool {
-        let thread = std::thread::current().id();
-        let mut failures = FAILURES.lock().unwrap();
-        let failure = failures.iter().position(|failure| {
-            failure.thread == thread && failure.operation == operation && (failure.matches)(path)
-        });
-        failure.is_some_and(|index| {
-            failures.remove(index);
-            true
-        })
-    }
-
-    pub(super) fn create_dir(path: impl AsRef<Path>) -> io::Result<()> {
-        check_failure(Operation::CreateDirectory, path.as_ref())?;
-        std::fs::create_dir(path)
-    }
-
-    pub(super) fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
-        check_failure(Operation::CreateDirectoryTree, path.as_ref())?;
-        std::fs::create_dir_all(path)
-    }
-
-    pub(super) fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<std::fs::Metadata> {
-        check_failure(Operation::Inspect, path.as_ref())?;
-        std::fs::symlink_metadata(path)
-    }
-
-    pub(super) struct ReadDir {
-        inner: std::fs::ReadDir,
-        fail_next_entry: bool,
-    }
-
-    impl Iterator for ReadDir {
-        type Item = io::Result<std::fs::DirEntry>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            if self.fail_next_entry {
-                self.fail_next_entry = false;
-                return Some(Err(io::Error::other("injected filesystem failure")));
-            }
-
-            self.inner.next()
-        }
-    }
-
-    pub(super) fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
-        let path = path.as_ref();
-        let fail_next_entry = take_failure(Operation::ReadDirectoryEntry, path);
-        std::fs::read_dir(path).map(|inner| ReadDir {
-            inner,
-            fail_next_entry,
-        })
-    }
-
-    pub(super) fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
-        check_failure(Operation::RemoveDirectoryTree, path.as_ref())?;
-        std::fs::remove_dir_all(path)
-    }
-
-    pub(super) fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-        check_failure(Operation::Read, path.as_ref())?;
-        std::fs::read(path)
-    }
-
-    pub(super) fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
-        check_failure(Operation::RenameSource, from.as_ref())?;
-        check_failure(Operation::RenameDestination, to.as_ref())?;
-        std::fs::rename(from, to)
-    }
-
-    pub(super) fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
-        check_failure(Operation::Write, path.as_ref())?;
-        std::fs::write(path, contents)
-    }
-}
 
 /// A skill declared by a Markdown file in a dependency's `context/` directory.
 #[derive(Clone, Debug)]
@@ -1162,7 +1022,7 @@ mod tests {
         let blocker = directory.path().join("asset-parent-is-file");
         fs::write(&blocker, "file").unwrap();
         let failure_path = blocker.join("skill");
-        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
         });
         assert!(
@@ -1342,10 +1202,10 @@ mod tests {
         fs::create_dir(&destination).unwrap();
 
         let failure_path = assets.clone();
-        let _failure = filesystem::fail_once(
-            test_filesystem::Operation::ReadDirectoryEntry,
-            move |path| path == failure_path,
-        );
+        let _failure =
+            filesystem::fail_once(filesystem::Operation::ReadDirectoryEntry, move |path| {
+                path == failure_path
+            });
 
         let error = copy_skill_assets(&assets, &destination, true).unwrap_err();
 
@@ -1513,7 +1373,7 @@ mod tests {
         fs::write(&blocker, "file").unwrap();
         let blocked_registry_path = blocker.join("registry.json");
         let failure_path = blocked_registry_path.clone();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
         });
         assert!(
@@ -1530,12 +1390,12 @@ mod tests {
         fs::write(&blocker, "file").unwrap();
         let child = blocker.join("child");
         let failure_path = child.clone();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
         });
         assert!(path_exists(&child).is_err());
         let failure_path = child.clone();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
         });
         assert!(remove_existing(&child).is_err());
@@ -1871,7 +1731,7 @@ mod tests {
             transaction_fixture();
         let failure_path = registry_path.clone();
         let _failure =
-            filesystem::fail_once(test_filesystem::Operation::RenameDestination, move |path| {
+            filesystem::fail_once(filesystem::Operation::RenameDestination, move |path| {
                 path == failure_path
             });
         let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
@@ -1891,7 +1751,7 @@ mod tests {
             transaction_fixture();
         let failure_path = previous_skill.clone();
         let _failure =
-            filesystem::fail_once(test_filesystem::Operation::RenameDestination, move |path| {
+            filesystem::fail_once(filesystem::Operation::RenameDestination, move |path| {
                 path == failure_path
             });
         let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
@@ -1910,7 +1770,7 @@ mod tests {
         let (_directory, installer, skill_path, registry_path) = fresh_install_fixture();
         let failure_path = skill_path.clone();
         let _failure =
-            filesystem::fail_once(test_filesystem::Operation::RenameDestination, move |path| {
+            filesystem::fail_once(filesystem::Operation::RenameDestination, move |path| {
                 path == failure_path
             });
 
@@ -1926,7 +1786,7 @@ mod tests {
         let (_directory, installer, skill_path, registry_path) = fresh_install_fixture();
         let failure_path = registry_path.clone();
         let _failure =
-            filesystem::fail_once(test_filesystem::Operation::RenameDestination, move |path| {
+            filesystem::fail_once(filesystem::Operation::RenameDestination, move |path| {
                 path == failure_path
             });
 
@@ -1942,10 +1802,9 @@ mod tests {
         let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
             transaction_fixture();
         let failure_path = previous_skill.clone();
-        let _failure =
-            filesystem::fail_once(test_filesystem::Operation::RenameSource, move |path| {
-                path == failure_path
-            });
+        let _failure = filesystem::fail_once(filesystem::Operation::RenameSource, move |path| {
+            path == failure_path
+        });
         let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
 
         assert!(error.to_string().contains("cannot move existing skill"));
@@ -1962,10 +1821,9 @@ mod tests {
         let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
             transaction_fixture();
         let failure_path = stale_skill.clone();
-        let _failure =
-            filesystem::fail_once(test_filesystem::Operation::RenameSource, move |path| {
-                path == failure_path
-            });
+        let _failure = filesystem::fail_once(filesystem::Operation::RenameSource, move |path| {
+            path == failure_path
+        });
         let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
 
         assert!(
@@ -1985,7 +1843,7 @@ mod tests {
     fn rolls_back_installed_skills_when_staged_registry_write_fails() {
         let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
             transaction_fixture();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::Write, |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::Write, |path| {
             path.file_name() == Some(std::ffi::OsStr::new("registry.json"))
         });
         let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
@@ -2008,10 +1866,9 @@ mod tests {
         let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
             transaction_fixture();
         let failure_path = registry_path.clone();
-        let _failure =
-            filesystem::fail_once(test_filesystem::Operation::RenameSource, move |path| {
-                path == failure_path
-            });
+        let _failure = filesystem::fail_once(filesystem::Operation::RenameSource, move |path| {
+            path == failure_path
+        });
         let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
 
         assert!(
@@ -2031,7 +1888,7 @@ mod tests {
     fn cleans_staging_directory_when_preparing_staging_files_fails() {
         let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
             transaction_fixture();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::CreateDirectory, |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::CreateDirectory, |path| {
             path.file_name() == Some(std::ffi::OsStr::new("backups"))
         });
         let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
@@ -2057,7 +1914,7 @@ mod tests {
     #[test]
     fn reports_staging_directory_creation_failure() {
         let (_directory, installer, _, _, _, _) = transaction_fixture();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::CreateDirectory, |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::CreateDirectory, |path| {
             path.file_name()
                 .and_then(std::ffi::OsStr::to_str)
                 .is_some_and(|name| name.starts_with(".agent-context-staging-"))
@@ -2074,7 +1931,7 @@ mod tests {
         fs::create_dir_all(skills_root).unwrap();
         let unrelated_file = skills_root.join("unrelated-file");
         fs::write(&unrelated_file, "keep this file\n").unwrap();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::Write, |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::Write, |path| {
             path.file_name() == Some(std::ffi::OsStr::new("SKILL.md"))
         });
 
@@ -2098,10 +1955,10 @@ mod tests {
         let directory = tempdir().unwrap();
         let destination = directory.path().join("created/nested");
         let failure_path = destination.clone();
-        let _failure = filesystem::fail_once(
-            test_filesystem::Operation::CreateDirectoryTree,
-            move |path| path == failure_path,
-        );
+        let _failure =
+            filesystem::fail_once(filesystem::Operation::CreateDirectoryTree, move |path| {
+                path == failure_path
+            });
 
         let error = ensure_directory(&destination).unwrap_err();
 
@@ -2115,7 +1972,7 @@ mod tests {
         let registry_path = directory.path().join("registry.json");
         fs::write(&registry_path, r#"{"version":1,"skills":{}}"#).unwrap();
         let failure_path = registry_path.clone();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::Read, move |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::Read, move |path| {
             path == failure_path
         });
 
@@ -2129,7 +1986,7 @@ mod tests {
         let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
             transaction_fixture();
         let failure_path = previous_skill.clone();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
         });
 
@@ -2149,7 +2006,7 @@ mod tests {
         let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
             transaction_fixture();
         let failure_path = stale_skill.clone();
-        let _failure = filesystem::fail_once(test_filesystem::Operation::Inspect, move |path| {
+        let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
         });
 
@@ -2168,12 +2025,11 @@ mod tests {
     fn reports_staging_cleanup_errors_after_committing_the_install() {
         let (_directory, installer, previous_skill, stale_skill, registry_path, _) =
             transaction_fixture();
-        let _failure =
-            filesystem::fail_once(test_filesystem::Operation::RemoveDirectoryTree, |path| {
-                path.file_name()
-                    .and_then(std::ffi::OsStr::to_str)
-                    .is_some_and(|name| name.starts_with(".agent-context-staging-"))
-            });
+        let _failure = filesystem::fail_once(filesystem::Operation::RemoveDirectoryTree, |path| {
+            path.file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .is_some_and(|name| name.starts_with(".agent-context-staging-"))
+        });
 
         let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
 

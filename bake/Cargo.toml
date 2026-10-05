@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 socketry-project = ">=0.3.3"
 bake = "0"
-bake-agent-context = { version = "0.3.0", path = ".." }
+bake-agent-context = { version = "0.3.1", path = ".." }
 bake-cargo = { version = "0.4.0" }
 bake-license = { version = "0.2.0" }
 bake-releases = { version = "0.3.0" }

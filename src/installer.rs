@@ -1,11 +1,14 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
+#[cfg(test)]
+use super::test_filesystem as fs;
 use bake::{Error, Result};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ffi::{OsStr, OsString};
+#[cfg(not(test))]
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -190,13 +193,14 @@ impl Installer {
     }
 
     pub fn list_context_files(&self, package: &ContextPackage) -> Result<Vec<ContextFile>> {
+        let mut files = Vec::new();
+        collect_files(&package.context_path, &mut files)?;
+        files.sort();
+
         let skill_names: HashSet<_> = super::skill::list_package_skills(package)?
             .into_iter()
             .map(|skill| skill.source_name)
             .collect();
-        let mut files = Vec::new();
-        collect_files(&package.context_path, &mut files)?;
-        files.sort();
         Ok(files
             .into_iter()
             .filter_map(|file| {
@@ -214,7 +218,8 @@ impl Installer {
         let Some(package) = self.find_package(selector)? else {
             return Ok(None);
         };
-        let Some(path) = find_context_file(&package.context_path, file)? else {
+        let Some((context_root, path)) = find_context_file_with_root(&package.context_path, file)?
+        else {
             return Ok(None);
         };
 
@@ -222,8 +227,9 @@ impl Installer {
             .into_iter()
             .map(|skill| skill.source_name)
             .collect();
-        let context_root = canonical_context_root(&package.context_path)?;
-        let relative_path = relative_context_path(&path, &context_root)?;
+        let relative_path = path
+            .strip_prefix(&context_root)
+            .expect("find_context_file only returns paths within context_root");
         if is_skill_context_path(relative_path, &skill_names) {
             return Ok(None);
         }
@@ -339,7 +345,15 @@ struct CargoPackage {
     manifest_path: PathBuf,
 }
 
+#[cfg(test)]
 fn find_context_file(context_path: &Path, file: &str) -> Result<Option<PathBuf>> {
+    Ok(find_context_file_with_root(context_path, file)?.map(|(_, path)| path))
+}
+
+fn find_context_file_with_root(
+    context_path: &Path,
+    file: &str,
+) -> Result<Option<(PathBuf, PathBuf)>> {
     let requested = Path::new(file);
     if requested.is_absolute()
         || requested
@@ -351,6 +365,7 @@ fn find_context_file(context_path: &Path, file: &str) -> Result<Option<PathBuf>>
         ));
     }
 
+    let canonical_root = canonical_context_root(context_path)?;
     let mut candidates = vec![context_path.join(requested)];
     if requested.extension().is_none() {
         candidates.push(context_path.join(requested).with_extension("md"));
@@ -360,11 +375,10 @@ fn find_context_file(context_path: &Path, file: &str) -> Result<Option<PathBuf>>
         let Ok(canonical_candidate) = candidate.canonicalize() else {
             continue;
         };
-        let canonical_root = canonical_context_root(context_path)?;
         if !canonical_candidate.starts_with(&canonical_root) || !canonical_candidate.is_file() {
             continue;
         }
-        return Ok(Some(canonical_candidate));
+        return Ok(Some((canonical_root, canonical_candidate)));
     }
 
     Ok(None)
@@ -377,11 +391,6 @@ fn canonical_context_root(context_path: &Path) -> Result<PathBuf> {
             context_path.display()
         ))
     })
-}
-
-fn relative_context_path<'a>(path: &'a Path, root: &Path) -> Result<&'a Path> {
-    path.strip_prefix(root)
-        .map_err(|error| Error::new(format!("cannot make context path relative: {error}")))
 }
 
 fn read_context_file(path: &Path) -> Result<Option<String>> {
@@ -614,6 +623,16 @@ mod tests {
         assert!(error.to_string().contains("cannot parse cargo metadata"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn reports_metadata_parse_errors_from_cargo() {
+        let directory = tempdir().unwrap();
+        let error =
+            Installer::new_with_cargo(directory.path().to_path_buf(), "/usr/bin/true".into())
+                .unwrap_err();
+        assert!(error.to_string().contains("cannot parse cargo metadata"));
+    }
+
     #[test]
     fn discovers_only_resolved_non_workspace_context_packages_and_disambiguates_versions() {
         let directory = tempdir().unwrap();
@@ -786,8 +805,8 @@ mod tests {
         assert!(find_context_file(&context, "/etc/passwd").is_err());
         assert!(find_context_file(&context, "./guide.md").is_err());
         assert!(find_context_file(&context, "nested/../guide.md").is_err());
+        assert!(find_context_file(&context.join("missing"), "guide.md").is_err());
         assert!(canonical_context_root(&context.join("does-not-exist")).is_err());
-        assert!(relative_context_path(&directory.path().join("outside"), &context).is_err());
         assert!(read_context_file(&context).is_err());
 
         let markdown = markdown_files(&context).unwrap();
@@ -818,6 +837,11 @@ mod tests {
         write(&source, "nested/my-skill.md", "ordinary nested context\n");
         write(&source, "README.MD", "upper-case extension\n");
         fs::write(source.join("plain.txt"), "text").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(source.join("guide.md"), source.join("linked.md")).unwrap();
+        }
 
         let package = package("provider", "1.0.0", source.clone());
         let installer = installer(root, vec![package.clone()]);
@@ -943,6 +967,237 @@ mod tests {
         fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
 
         assert!(result.unwrap_err().to_string().contains("cannot read"));
+    }
+
+    #[test]
+    fn reports_directory_entry_type_and_recursive_read_errors() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("context");
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::write(root.join("guide.md"), "guide").unwrap();
+
+        let failure_path = root.clone();
+        let _failure = fs::fail_once(fs::Operation::ReadDirectoryEntry, move |path| {
+            path == failure_path
+        });
+        assert!(
+            markdown_files(&root)
+                .unwrap_err()
+                .to_string()
+                .contains("injected")
+        );
+        drop(_failure);
+
+        let file = root.join("guide.md");
+        let failure_path = file.clone();
+        let _failure = fs::fail_once(fs::Operation::FileType, move |path| path == failure_path);
+        assert!(
+            markdown_files(&root)
+                .unwrap_err()
+                .to_string()
+                .contains("injected")
+        );
+        drop(_failure);
+
+        let failure_path = root.join("nested");
+        let _failure = fs::fail_once(fs::Operation::ReadDirectory, move |path| {
+            path == failure_path
+        });
+        assert!(
+            markdown_files(&root)
+                .unwrap_err()
+                .to_string()
+                .contains("cannot read")
+        );
+        drop(_failure);
+
+        let failure_path = root.clone();
+        let _failure = fs::fail_once(fs::Operation::ReadDirectoryEntry, move |path| {
+            path == failure_path
+        });
+        assert!(collect_files(&root, &mut Vec::new()).is_err());
+        drop(_failure);
+
+        let failure_path = file;
+        let _failure = fs::fail_once(fs::Operation::FileType, move |path| path == failure_path);
+        assert!(collect_files(&root, &mut Vec::new()).is_err());
+        drop(_failure);
+
+        let failure_path = root.join("nested");
+        let _failure = fs::fail_once(fs::Operation::ReadDirectory, move |path| {
+            path == failure_path
+        });
+        assert!(collect_files(&root, &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn reports_copy_entry_type_recursive_and_empty_directory_errors() {
+        let directory = tempdir().unwrap();
+        let source = directory.path().join("source");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::create_dir(source.join("empty")).unwrap();
+        fs::write(source.join("guide.md"), "guide").unwrap();
+
+        let failure_path = source.clone();
+        let _failure = fs::fail_once(fs::Operation::ReadDirectoryEntry, move |path| {
+            path == failure_path
+        });
+        assert!(
+            copy_context_tree(
+                &source,
+                &directory.path().join("entry"),
+                &HashSet::new(),
+                true
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("injected")
+        );
+        drop(_failure);
+
+        let failure_path = source.join("guide.md");
+        let _failure = fs::fail_once(fs::Operation::FileType, move |path| path == failure_path);
+        assert!(
+            copy_context_tree(
+                &source,
+                &directory.path().join("type"),
+                &HashSet::new(),
+                true
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("injected")
+        );
+        drop(_failure);
+
+        let failure_path = source.join("nested");
+        let _failure = fs::fail_once(fs::Operation::ReadDirectory, move |path| {
+            path == failure_path
+        });
+        assert!(
+            copy_context_tree(
+                &source,
+                &directory.path().join("recursive"),
+                &HashSet::new(),
+                true
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("cannot read")
+        );
+        drop(_failure);
+
+        let empty_destination = directory.path().join("empty-destination/empty");
+        let failure_path = empty_destination.clone();
+        let _failure = fs::fail_once(fs::Operation::RemoveDirectory, move |path| {
+            path == failure_path
+        });
+        assert!(
+            copy_context_tree(
+                &source,
+                &directory.path().join("empty-destination"),
+                &HashSet::new(),
+                true
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("cannot remove empty context directory")
+        );
+    }
+
+    #[test]
+    fn propagates_package_operation_errors() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let source = root.join("provider/context");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("guide.md"), "# Guide\n").unwrap();
+        fs::write(source.join("binary.txt"), [0xff]).unwrap();
+        let provider_package = package("provider", "1.0.0", source.clone());
+        let provider_installer = installer(root, vec![provider_package.clone()]);
+
+        assert_eq!(
+            provider_installer
+                .show_context_file("provider", "guide.md")
+                .unwrap(),
+            Some("# Guide\n".to_owned())
+        );
+        assert!(
+            provider_installer
+                .show_context_file("provider", "binary.txt")
+                .unwrap_err()
+                .to_string()
+                .contains("cannot read")
+        );
+
+        let mut ambiguous = provider_package.clone();
+        ambiguous.version = "2.0.0".to_owned();
+        ambiguous.selector = "provider@2.0.0".to_owned();
+        let ambiguous_installer = installer(root, vec![provider_package.clone(), ambiguous]);
+        assert!(
+            ambiguous_installer
+                .show_context_file("provider", "guide.md")
+                .unwrap_err()
+                .to_string()
+                .contains("multiple versions")
+        );
+
+        let destination = root.join(".agents/context/provider@1.0.0");
+        let failure_path = destination.clone();
+        let _failure = fs::fail_once(fs::Operation::Inspect, move |path| path == failure_path);
+        assert!(provider_installer.install_package("provider").is_err());
+        drop(_failure);
+
+        let failure_path = source.join("guide.md");
+        let _failure = fs::fail_once(fs::Operation::Copy, move |path| path == failure_path);
+        assert!(provider_installer.install_package("provider").is_err());
+        drop(_failure);
+
+        let skill_only = root.join("skills/context");
+        fs::create_dir_all(skill_only.join("skill/assets")).unwrap();
+        fs::write(
+            skill_only.join("skill.md"),
+            "---\ntype: skill\ndescription: Skill.\n---\n\n# Skill\n",
+        )
+        .unwrap();
+        fs::write(skill_only.join("skill/assets/image.png"), "asset").unwrap();
+        let skill_installer = installer(root, vec![package("skills", "1.0.0", skill_only)]);
+        let empty_destination = root.join(".agents/context/skills@1.0.0");
+        let failure_path = empty_destination.clone();
+        let _failure = fs::fail_once(fs::Operation::RemoveDirectoryTree, move |path| {
+            path == failure_path
+        });
+        assert!(skill_installer.install_package("skills").is_err());
+        drop(_failure);
+        assert!(skill_installer.install_all().unwrap().is_empty());
+
+        let bad = root.join("broken/context");
+        fs::create_dir_all(&bad).unwrap();
+        fs::write(bad.join("broken.md"), "---\ntype: guide\n---\n# Bad\n").unwrap();
+        let broken_installer = installer(root, vec![package("broken", "1.0.0", bad)]);
+        assert!(
+            broken_installer
+                .list_context_files(&broken_installer.packages[0])
+                .is_err()
+        );
+        assert!(
+            broken_installer
+                .show_context_file("broken", "broken.md")
+                .is_err()
+        );
+        assert!(broken_installer.install_package("broken").is_err());
+        assert!(broken_installer.install_all().is_err());
+
+        let files_installer = installer(root, vec![provider_package]);
+        let failure_path = source.clone();
+        let _failure = fs::fail_once(fs::Operation::ReadDirectory, move |path| {
+            path == failure_path
+        });
+        assert!(
+            files_installer
+                .list_context_files(&files_installer.packages[0])
+                .is_err()
+        );
     }
 
     #[cfg(unix)]

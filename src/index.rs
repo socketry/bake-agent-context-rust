@@ -3,6 +3,8 @@
 
 use super::installer::{ContextPackage, markdown_files};
 use super::skill::frontmatter_description;
+#[cfg(test)]
+use super::test_filesystem as fs;
 use bake::{Error, Result};
 use socketry_markdown::{
     ParseOptions,
@@ -10,6 +12,7 @@ use socketry_markdown::{
     to_mdast,
 };
 use std::collections::HashMap;
+#[cfg(not(test))]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -143,7 +146,9 @@ impl ContextIndex {
             let mut files = Vec::new();
             for path in markdown_files(&package_path)? {
                 let (title, description) = extract_content(&path)?;
-                let relative_path = relative_context_path(&package_path, &path)?;
+                let relative_path = path
+                    .strip_prefix(&package_path)
+                    .expect("markdown_files only returns paths within its requested directory");
                 files.push(ContextDocument {
                     path: relative_path.to_path_buf(),
                     title,
@@ -163,12 +168,6 @@ impl ContextIndex {
 fn create_context_directory(path: &Path) -> Result<()> {
     fs::create_dir_all(path)
         .map_err(|error| Error::new(format!("cannot create {}: {error}", path.display())))
-}
-
-fn relative_context_path(package_path: &Path, path: &Path) -> Result<PathBuf> {
-    path.strip_prefix(package_path)
-        .map(Path::to_path_buf)
-        .map_err(|error| Error::new(format!("cannot make context path relative: {error}")))
 }
 
 fn append_document(
@@ -449,6 +448,100 @@ mod tests {
     }
 
     #[test]
+    fn propagates_index_and_exclude_write_errors() {
+        let directory = tempdir().unwrap();
+        let context_path = directory.path().join(".agents/context");
+        let failure_path = context_path.clone();
+        let _failure = fs::fail_once(fs::Operation::CreateDirectoryTree, move |path| {
+            path == failure_path
+        });
+        assert!(ContextIndex::new(directory.path()).update_index().is_err());
+        drop(_failure);
+
+        let directory = tempdir().unwrap();
+        let index_path = directory.path().join(".agents/context/index.md");
+        let failure_path = index_path.clone();
+        let _failure = fs::fail_once(fs::Operation::Write, move |path| path == failure_path);
+        assert!(ContextIndex::new(directory.path()).update_index().is_err());
+        drop(_failure);
+
+        let directory = tempdir().unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        fs::write(
+            directory.path().join(".git/info/exclude"),
+            "# BEGIN bake-agent-context",
+        )
+        .unwrap();
+        assert!(ContextIndex::new(directory.path()).update_index().is_err());
+
+        let directory = tempdir().unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let exclude_path = directory.path().join(".git/info/exclude");
+        let failure_path = exclude_path.clone();
+        let _failure = fs::fail_once(fs::Operation::Write, move |path| path == failure_path);
+        assert!(ContextIndex::new(directory.path()).update_index().is_err());
+    }
+
+    #[test]
+    fn propagates_context_entry_read_and_markdown_errors() {
+        let directory = tempdir().unwrap();
+        let context_path = directory.path().join(".agents/context");
+        fs::create_dir_all(&context_path).unwrap();
+        let failure_path = context_path.clone();
+        let _failure = fs::fail_once(fs::Operation::ReadDirectoryEntry, move |path| {
+            path == failure_path
+        });
+        assert!(
+            ContextIndex::new(directory.path())
+                .generate_index()
+                .is_err()
+        );
+        drop(_failure);
+
+        let package_path = context_path.join("provider");
+        fs::create_dir_all(&package_path).unwrap();
+        let failure_path = package_path.clone();
+        let _failure = fs::fail_once(fs::Operation::FileType, move |path| path == failure_path);
+        assert!(
+            ContextIndex::new(directory.path())
+                .generate_index()
+                .is_err()
+        );
+        drop(_failure);
+
+        let guide = package_path.join("guide.md");
+        fs::write(&guide, "# Guide\n").unwrap();
+        let failure_path = package_path.clone();
+        let _failure = fs::fail_once(fs::Operation::ReadDirectory, move |path| {
+            path == failure_path
+        });
+        assert!(
+            ContextIndex::new(directory.path())
+                .generate_index()
+                .is_err()
+        );
+        drop(_failure);
+
+        let failure_path = guide.clone();
+        let _failure = fs::fail_once(fs::Operation::Read, move |path| path == failure_path);
+        assert!(
+            ContextIndex::new(directory.path())
+                .generate_index()
+                .is_err()
+        );
+    }
+
+    #[test]
     fn updates_local_git_excludes_with_the_generated_index() {
         let directory = tempdir().unwrap();
         let output = std::process::Command::new("git")
@@ -519,16 +612,5 @@ mod tests {
             });
             assert_eq!(heading_text(&heading), expected);
         }
-    }
-
-    #[test]
-    fn reports_relative_path_invariant_violations() {
-        let directory = tempdir().unwrap();
-        let package = directory.path().join("provider");
-        assert!(relative_context_path(&package, &directory.path().join("outside.md")).is_err());
-        assert_eq!(
-            relative_context_path(&package, &package.join("guide.md")).unwrap(),
-            PathBuf::from("guide.md")
-        );
     }
 }
