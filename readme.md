@@ -69,6 +69,10 @@ Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or
 
 See [releases.md](releases.md) for the full release history.
 
+### v0.3.3
+
+- Use Cargo-selected dependency versions and generated task links in setup instructions.
+
 ### v0.3.2
 
 - Adopt `socketry-project` 0.3.7 for shared project tasks and Markdown normalization.
@@ -78,11 +82,6 @@ See [releases.md](releases.md) for the full release history.
 ### v0.3.1
 
 - Require `socketry-markdown` 0.2.0 or newer for safe inline Markdown serialization.
-
-### v0.3.0
-
-- Expose the context API and Bake task adapters from the crate root, removing the redundant `agent::context` path while preserving all `agent:context:*` tasks.
-- Keep the private task executable on compatible Bake 0.x and current task-library releases.
 
 <!-- bake-readme:releases:end -->
 

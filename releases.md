@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.3.3
 
 - Use Cargo-selected dependency versions and generated task links in setup instructions.
 
