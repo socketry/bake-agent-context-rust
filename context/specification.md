@@ -64,6 +64,7 @@ Context providers MUST include a `context/` directory in their package root. Thi
 - **Versioning**: Must be versioned alongside the package code.
 
 Example structure:
+
 ```
 package-root/
 ├── context/
@@ -87,6 +88,7 @@ Context consumers SHOULD create a `.agents/context/` directory in their project 
 - **Transient Nature**: Should contain only reproducible content that can be regenerated from installed packages and MUST NOT contain unique or modified files.
 
 Example structure:
+
 ```
 project-root/
 ├── .agents/context/
@@ -136,6 +138,7 @@ Context files SHOULD follow these naming conventions:
 - Group related files in subdirectories when appropriate.
 
 Common file names:
+
 - `getting-started.md`
 - `configuration.md`
 - `troubleshooting.md`
@@ -145,27 +148,11 @@ Common file names:
 
 ### 4.4 Skill Documents
 
-A context provider may distribute an Agent Skill as a Markdown document directly
-inside `context/`. The document MUST use YAML front matter with `type: skill`
-and a non-empty `description`. Its filename, without the `.md` extension, is
-the local skill name. A directory with the same name MAY contain skill
-resources. Consumers MUST prefix the local name with the provider package name
-and a hyphen to produce the globally unique installed skill name.
+A context provider may distribute an Agent Skill as a Markdown document directly inside `context/`. The document MUST use YAML front matter with `type: skill` and a non-empty `description`. Its filename, without the `.md` extension, is the local skill name. A directory with the same name MAY contain skill resources. Consumers MUST prefix the local name with the provider package name and a hyphen to produce the globally unique installed skill name.
 
-Consumers that support skills MUST install the document as
-`.agents/skills/<package-name>-<local-name>/SKILL.md`, with the installed name
-and `description` in its front matter. Files in the matching resource directory
-MUST be copied into that skill directory. Skill documents and their resources
-MUST NOT also be copied into `.agents/context/` or included in the generated
-context index.
+Consumers that support skills MUST install the document as `.agents/skills/<package-name>-<local-name>/SKILL.md`, with the installed name and `description` in its front matter. Files in the matching resource directory MUST be copied into that skill directory. Skill documents and their resources MUST NOT also be copied into `.agents/context/` or included in the generated context index.
 
-Dependency-installed skill directories SHOULD be excluded from version
-control, while project-owned skills in `.agents/skills/` SHOULD remain
-trackable. Git integrations SHOULD add exact dependency-installed skill paths
-to `.git/info/exclude` rather than ignore the entire `.agents/skills/`
-directory. They SHOULD mark generated entries with comments and preserve
-user-authored rules outside that marked section. Any generated skill
-ownership registry SHOULD also be excluded from version control.
+Dependency-installed skill directories SHOULD be excluded from version control, while project-owned skills in `.agents/skills/` SHOULD remain trackable. Git integrations SHOULD add exact dependency-installed skill paths to `.git/info/exclude` rather than ignore the entire `.agents/skills/` directory. They SHOULD mark generated entries with comments and preserve user-authored rules outside that marked section. Any generated skill ownership registry SHOULD also be excluded from version control.
 
 ## 5. Discovery and Installation
 

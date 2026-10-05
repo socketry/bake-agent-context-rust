@@ -1,38 +1,37 @@
 # Releases
 
+## v0.3.2
+
+- Adopt `socketry-project` 0.3.7 for shared project tasks and Markdown normalization.
+- Require the aggregate test and coverage result for pull request merges.
+- Refresh dependency examples and repository-owned agent guidance.
+
 ## v0.3.1
 
-- Require `socketry-markdown` 0.2.0 or newer for safe inline Markdown
-  serialization.
+- Require `socketry-markdown` 0.2.0 or newer for safe inline Markdown serialization.
 
 ## v0.3.0
 
-- Expose the context API and Bake task adapters from the crate root, removing
-  the redundant `agent::context` path while preserving all `agent:context:*` tasks.
+- Expose the context API and Bake task adapters from the crate root, removing the redundant `agent::context` path while preserving all `agent:context:*` tasks.
 - Keep the private task executable on compatible Bake 0.x and current task-library releases.
 
 ## v0.2.2
 
-- Declare compatibility with the Bake 0.x API so task libraries can share one task registry
-  when upgrading to crate-derived task namespaces.
+- Declare compatibility with the Bake 0.x API so task libraries can share one task registry when upgrading to crate-derived task namespaces.
 
 ## v0.2.1
 
-- Use the shared `socketry-project` Releasing skill for the standard release
-  process and remove references to the duplicate Bake Cargo publishing context.
+- Use the shared `socketry-project` Releasing skill for the standard release process and remove references to the duplicate Bake Cargo publishing context.
 
 ## v0.2.0
 
-- Write the context index to `.agents/context/index.md` without creating or
-  modifying the repository owner's `agents.md`.
+- Write the context index to `.agents/context/index.md` without creating or modifying the repository owner's `agents.md`.
 - Install the usage guide as the `bake-agent-context-usage` skill.
-- Keep generated context and dependency-provided skills out of Git using local
-  excludes, while allowing projects to track their own skills.
+- Keep generated context and dependency-provided skills out of Git using local excludes, while allowing projects to track their own skills.
 
 ## v0.1.5
 
-- Explain how to organize reusable package context and repository-only agent
-  instructions.
+- Explain how to organize reusable package context and repository-only agent instructions.
 
 ## v0.1.4
 
@@ -54,6 +53,7 @@
 - Switch the runtime dependency from `socketry-bake` to `bake` 0.17.0.
 
 - Add shared Rust context for Socketry crate development.
+
 - Keep project-owned `.agents/` guidance while ignoring generated `.agents/context/` files.
 
 ## v0.1.0
