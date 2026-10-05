@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-socketry-project = "0.3"
+socketry-project = ">=0.3.4"
 bake = "0"
 bake-agent-context = { version = "0.3.0", path = ".." }
 bake-cargo = { version = "0.4.0" }
