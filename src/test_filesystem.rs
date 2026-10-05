@@ -2,7 +2,6 @@
 // Copyright, 2026, by Samuel Williams.
 
 //! Deterministic filesystem failures for exercising error handling in tests.
-
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

@@ -8,8 +8,8 @@ Add the task library to the unpublished `bake/` crate in your project, then link
 
 ```toml
 [dependencies]
-bake = "0.17"
-bake-agent-context = "0.1"
+bake = "0.19"
+bake-agent-context = "0.3"
 ```
 
 ```rust,ignore
@@ -69,33 +69,29 @@ This crate includes guides for its users and for other crate authors:
 
 ## Releasing
 
-Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`,
-or `bump --version X.Y.Z`), then run `cargo bake cargo:release` and open a
-pull request. After review and merge, GitHub Actions publishes the release
-when the configured `crates-io` environment approves it. Follow the shared
-[Releasing skill](https://github.com/socketry/socketry-project-rust/blob/main/context/releasing.md)
-for the standard process.
+Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or `bump --version X.Y.Z`), then run `cargo bake cargo:release` and open a pull request. After review and merge, GitHub Actions publishes the release when the configured `crates-io` environment approves it. Follow the shared [Releasing skill](https://github.com/socketry/socketry-project-rust/blob/main/context/releasing.md) for the standard process.
 
 ## Releases
 
 <!-- bake-readme:releases:start -->
+
 See [releases.md](releases.md) for the full release history.
+
+### v0.3.2
+
+- Adopt `socketry-project` 0.3.7 for shared project tasks and Markdown normalization.
+- Require the aggregate test and coverage result for pull request merges.
+- Refresh dependency examples and repository-owned agent guidance.
 
 ### v0.3.1
 
-- Require `socketry-markdown` 0.2.0 or newer for safe inline Markdown
-  serialization.
+- Require `socketry-markdown` 0.2.0 or newer for safe inline Markdown serialization.
 
 ### v0.3.0
 
-- Expose the context API and Bake task adapters from the crate root, removing
-  the redundant `agent::context` path while preserving all `agent:context:*` tasks.
+- Expose the context API and Bake task adapters from the crate root, removing the redundant `agent::context` path while preserving all `agent:context:*` tasks.
 - Keep the private task executable on compatible Bake 0.x and current task-library releases.
 
-### v0.2.2
-
-- Declare compatibility with the Bake 0.x API so task libraries can share one task registry
-  when upgrading to crate-derived task namespaces.
 <!-- bake-readme:releases:end -->
 
 ## Contributing
@@ -104,4 +100,4 @@ Please open an issue or pull request on [GitHub](https://github.com/socketry/bak
 
 ### Agent Context
 
-Before contributing, follow `agents.md` if present, then read relevant guides linked from `.agents/context/index.md` and apply any matching skills. If the index or context files are missing or out of date, run `cargo bake agent:context:install` to refresh them.
+Run `cargo bake agent:context:install` to install shared context and skills. Read `.agents/context/index.md` to find relevant guides, follow `agents.md` if present, and apply skills under `.agents/skills/`. The installer preserves repository-owned `agents.md`; it does not create or regenerate that file.

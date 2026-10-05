@@ -8,8 +8,8 @@ Bake tasks belong in your project's private `bake/` crate. Add the Bake task lib
 
 ```toml
 [dependencies]
-bake = "0.17"
-bake-agent-context = "0.1"
+bake = "0.19"
+bake-agent-context = "0.3"
 ```
 
 Link the task library from `bake/src/main.rs` and run the discovered task registry:
