@@ -1,5 +1,10 @@
 # Releases
 
+## v0.3.1
+
+- Require `socketry-markdown` 0.2.0 or newer for safe inline Markdown
+  serialization.
+
 ## v0.3.0
 
 - Expose the context API and Bake task adapters from the crate root, removing

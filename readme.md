@@ -81,6 +81,11 @@ for the standard process.
 <!-- bake-readme:releases:start -->
 See [releases.md](releases.md) for the full release history.
 
+### v0.3.1
+
+- Require `socketry-markdown` 0.2.0 or newer for safe inline Markdown
+  serialization.
+
 ### v0.3.0
 
 - Expose the context API and Bake task adapters from the crate root, removing
@@ -91,11 +96,6 @@ See [releases.md](releases.md) for the full release history.
 
 - Declare compatibility with the Bake 0.x API so task libraries can share one task registry
   when upgrading to crate-derived task namespaces.
-
-### v0.2.1
-
-- Use the shared `socketry-project` Releasing skill for the standard release
-  process and remove references to the duplicate Bake Cargo publishing context.
 <!-- bake-readme:releases:end -->
 
 ## Contributing
