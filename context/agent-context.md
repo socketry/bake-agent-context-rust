@@ -21,3 +21,5 @@ The repository owner controls `agents.md`; context installation leaves it untouc
 Add `bake-agent-context` to the project's private `bake/` package, directly or through a shared task package such as `socketry-project`. Run `cargo bake agent:context:install` to install ordinary context and skills from resolved dependencies and update `.agents/context/index.md`. Run it again after changing a context-providing dependency. Use `--package CRATE` to install from one provider, or the skill-specific tasks to list and install selected skills.
 
 Before changing a project, follow its `agents.md` instructions, read relevant installed context from `.agents/context/index.md`, and apply any skills that fit the work. For details about the available Bake tasks and their options, use the `bake-agent-context-usage` skill.
+
+The shared skill ownership index uses version-two JSON with ecosystem, package, and version fields. Cargo refreshes preserve gem-owned entries and reject conflicting ownership. Version-one Cargo ownership migrates when rewritten. See the portable specification for the shared format.

@@ -6,7 +6,7 @@ license = "MIT"
 repository = "https://github.com/socketry/bake-agent-context-rust"
 description = "Install context files from Cargo dependencies for coding agents"
 readme = "readme.md"
-include = ["src/**", "context/**", "Cargo.toml", "readme.md", "license.md", "releases.md"]
+include = ["src/**", "tests/fixtures/**", "context/**", "Cargo.toml", "readme.md", "license.md", "releases.md"]
 
 [workspace]
 members = ["bake"]

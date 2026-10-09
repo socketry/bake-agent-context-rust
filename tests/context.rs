@@ -959,7 +959,7 @@ fn rejects_invalid_skill_registries_and_installation_paths() {
             .contains("invalid skill registry")
     );
 
-    fs::write(&registry_path, r#"{"version":2,"skills":{}}"#).unwrap();
+    fs::write(&registry_path, r#"{"version":3,"skills":{}}"#).unwrap();
     assert!(
         install_skills(&installer, None, None)
             .unwrap_err()

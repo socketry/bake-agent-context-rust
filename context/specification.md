@@ -148,7 +148,9 @@ Common file names:
 
 ### 4.4 Skill Documents
 
-A context provider may distribute an Agent Skill as a Markdown document directly inside `context/`. The document MUST use YAML front matter with `type: skill` and a non-empty `description`. Its filename, without the `.md` extension, is the local skill name. A directory with the same name MAY contain skill resources. Consumers MUST prefix the local name with the provider package name and a hyphen to produce the globally unique installed skill name.
+A context provider may distribute an Agent Skill as a Markdown document directly inside `context/`. The document MUST use YAML front matter with `type: skill` and a non-empty `description`. Its filename, without the `.md` extension, is the local skill name. A directory with the same name MAY contain skill resources. Consumers MUST prefix the local name with the lowercase provider package name (with underscores normalized to hyphens) and a hyphen to produce the installed skill name. Installed names MUST use lowercase ASCII letters, digits, and single hyphens, contain 1–64 characters, and begin and end with a letter or digit. Descriptions MUST contain 1–1,024 characters after trimming whitespace. Consumers MUST validate these fields and preserve additional skill metadata; generated installed names take precedence over a source `name` field.
+
+A consumer MAY also accept legacy `skills/<name>/SKILL.md` bundles, preserving their declared names and complete contents. Such bundles MUST meet the same metadata limits.
 
 Consumers that support skills MUST install the document as `.agents/skills/<package-name>-<local-name>/SKILL.md`, with the installed name and `description` in its front matter. Files in the matching resource directory MUST be copied into that skill directory. Skill documents and their resources MUST NOT also be copied into `.agents/context/` or included in the generated context index.
 
@@ -194,3 +196,36 @@ FOR each package with context:
       COPY it into .agents/context/package-name/, preserving its relative path
 END
 ```
+
+## 6. Generated Index and Repository Ownership
+
+Consumers SHOULD generate `.agents/context/index.md` with links relative to that file. Context installation MUST NOT create or modify the repository owner's `agents.md`. Owners can link to the generated index and instruct agents to read relevant installed guidance.
+
+Ordinary documents need no front matter. Consumers SHOULD use a document's first heading as its title (falling back to the filename) and its first prose sentence as its description. A non-empty YAML `description` takes precedence over prose. Unrelated ordinary-document metadata MUST be tolerated. Skill resource files are opaque assets and MUST NOT be parsed as context documents.
+
+A provider MAY supply `context/index.yaml` with `description` and a `files` sequence containing `path`, `title`, and `description`. Supporting consumers SHOULD preserve explicit ordering and overrides, omit missing or skill-only paths, and append unlisted ordinary documents. Fallback ordering is getting-started, overview, usage, configuration, migration, troubleshooting, debugging, then alphabetical order.
+
+## 7. Shared Skill Ownership Index
+
+Consumers MUST record dependency-installed skill ownership in `.agents/skills/.agent-context-skills.json`:
+
+```json
+{
+  "version": 2,
+  "skills": {
+    "provider-workflow": {
+      "ecosystem": "cargo",
+      "package": "provider",
+      "version": "1.0.0"
+    }
+  }
+}
+```
+
+Ruby gems use `ecosystem: gem`; Cargo crates use `ecosystem: cargo`. Each installer MUST preserve foreign ecosystem entries. A full refresh reconciles only its ecosystem; a package refresh reconciles only that ecosystem and package; installing one named skill MUST preserve other owned skills. Providers removed from the dependency graph and providers that become empty MUST be included in full reconciliation.
+
+Existing unowned destinations and destinations owned by another ecosystem or package MUST NOT be replaced. Installers MUST validate the selected sources and collisions, stage skill files, and preserve the previous directories and ownership index when copying or committing a replacement fails. Shared index writes MUST use atomic replacement.
+
+Version-one JSON ownership has implicit Cargo ownership and MUST migrate to version two when rewritten. Ruby consumers SHOULD import the legacy `.agent-skills.yaml` registry, rejecting ownership conflicts. The legacy Ruby registry MUST be retired after a successful migration so removed skills cannot be re-imported.
+
+Git integrations SHOULD maintain one marked exclusion block covering generated context, ownership files, and exact dependency-owned skill directories from all ecosystems. They MUST preserve user rules and leave repository-owned instructions and skills trackable.

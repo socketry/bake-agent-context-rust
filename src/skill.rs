@@ -14,7 +14,7 @@ use std::fs as filesystem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
-const REGISTRY_VERSION: u32 = 1;
+const REGISTRY_VERSION: u32 = 2;
 const REGISTRY_FILE: &str = ".agent-context-skills.json";
 static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -28,6 +28,7 @@ pub struct Skill {
     pub(crate) source_name: String,
     assets: Option<PathBuf>,
     body: String,
+    metadata: BTreeMap<String, serde_yaml_ng::Value>,
 }
 
 impl Skill {
@@ -38,17 +39,20 @@ impl Skill {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ContextFrontmatter {
     #[serde(rename = "type")]
     document_type: Option<String>,
     description: Option<String>,
+    #[serde(flatten)]
+    metadata: BTreeMap<String, serde_yaml_ng::Value>,
 }
 
 #[derive(Serialize)]
 struct SkillFrontmatter<'a> {
     name: &'a str,
     description: &'a str,
+    #[serde(flatten)]
+    metadata: &'a BTreeMap<String, serde_yaml_ng::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -59,6 +63,8 @@ struct Registry {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct SkillOwner {
+    #[serde(default)]
+    ecosystem: String,
     package: String,
     version: String,
 }
@@ -109,9 +115,22 @@ fn compare_skills(left: &Skill, right: &Skill) -> Comparison {
 pub(crate) fn list_package_skills(package: &ContextPackage) -> Result<Vec<Skill>> {
     let mut skills = Vec::new();
     let mut files = markdown_files(&package.context_path)?;
-    files.sort();
+    files.sort_by_key(|path| {
+        (
+            path.parent() != Some(package.context_path.as_path()),
+            path.clone(),
+        )
+    });
 
     for source in files {
+        if skills.iter().any(|skill: &Skill| {
+            skill
+                .assets
+                .as_ref()
+                .is_some_and(|assets| source.starts_with(assets))
+        }) {
+            continue;
+        }
         let contents = filesystem::read_to_string(&source)
             .map_err(|error| Error::new(format!("cannot read {}: {error}", source.display())))?;
         if let Some(skill) = parse_skill_document(package, &source, &contents)? {
@@ -186,6 +205,11 @@ fn parse_skill_document(
         source_name,
         assets,
         body,
+        metadata: {
+            let mut metadata = frontmatter.metadata;
+            metadata.remove("name");
+            metadata
+        },
     }))
 }
 
@@ -294,11 +318,11 @@ pub fn install_skills(
     let mut destination_exists = HashMap::new();
     for skill in &skills {
         if let Some(owner) = registry.skills.get(&skill.name)
-            && owner.package != skill.package.name
+            && (owner.ecosystem != "cargo" || owner.package != skill.package.name)
         {
             return Err(Error::new(format!(
-                "skill {:?} is already installed from crate {:?}; it cannot be replaced by {:?}",
-                skill.name, owner.package, skill.package.name
+                "skill {:?} is already installed from {} package {:?}; it cannot be replaced by Cargo package {:?}",
+                skill.name, owner.ecosystem, owner.package, skill.package.name
             )));
         }
 
@@ -306,10 +330,9 @@ pub fn install_skills(
         let exists = path_exists(&destination)?;
         destination_exists.insert(skill.name.clone(), exists);
         if exists
-            && registry
-                .skills
-                .get(&skill.name)
-                .is_none_or(|owner| owner.package != skill.package.name)
+            && registry.skills.get(&skill.name).is_none_or(|owner| {
+                owner.ecosystem != "cargo" || owner.package != skill.package.name
+            })
         {
             return Err(Error::new(format!(
                 "skill destination {} already exists and is not managed by Bake Agent Context",
@@ -322,7 +345,8 @@ pub fn install_skills(
         .skills
         .iter()
         .filter(|(name, owner)| {
-            !selected_by_name.contains_key(name.as_str())
+            owner.ecosystem == "cargo"
+                && !selected_by_name.contains_key(name.as_str())
                 && (reconcile_all
                     || match reconcile_package {
                         Some(package) => owner.package == package,
@@ -343,6 +367,7 @@ pub fn install_skills(
         registry.skills.insert(
             skill.name.clone(),
             SkillOwner {
+                ecosystem: "cargo".to_owned(),
                 package: skill.package.name.clone(),
                 version: skill.package.version.clone(),
             },
@@ -554,9 +579,10 @@ fn write_staged_skill(skill: &Skill, destination: &Path) -> Result<()> {
     let metadata = SkillFrontmatter {
         name: &skill.name,
         description: &skill.description,
+        metadata: &skill.metadata,
     };
     let yaml = serde_yaml_ng::to_string(&metadata)
-        .expect("skill front matter contains only serializable strings");
+        .expect("skill front matter contains only serializable YAML values");
     let mut output = format!("---\n{yaml}---\n\n");
     output.push_str(&skill.body);
     if !output.ends_with('\n') {
@@ -695,12 +721,18 @@ fn load_registry_with_existence(path: &Path) -> Result<(Registry, bool)> {
             )));
         }
     };
-    let registry: Registry = serde_json::from_slice(&bytes).map_err(|error| {
+    let mut registry: Registry = serde_json::from_slice(&bytes).map_err(|error| {
         Error::new(format!(
             "invalid skill registry {}: {error}",
             path.display()
         ))
     })?;
+    if registry.version == 1 {
+        for owner in registry.skills.values_mut() {
+            owner.ecosystem = "cargo".to_owned();
+        }
+        registry.version = REGISTRY_VERSION;
+    }
     if registry.version != REGISTRY_VERSION {
         return Err(Error::new(format!(
             "unsupported skill registry version {} in {}",
@@ -708,8 +740,14 @@ fn load_registry_with_existence(path: &Path) -> Result<(Registry, bool)> {
             path.display()
         )));
     }
-    for name in registry.skills.keys() {
+    for (name, owner) in &registry.skills {
         validate_skill_name(name)?;
+        if owner.ecosystem.is_empty() || owner.package.is_empty() || owner.version.is_empty() {
+            return Err(Error::new(format!(
+                "invalid owner for skill {name:?} in {}",
+                path.display()
+            )));
+        }
     }
     Ok((registry, true))
 }
@@ -927,14 +965,6 @@ mod tests {
             )
             .contains("1024 character limit")
         );
-        assert!(
-            error_for_document(
-                "provider",
-                "unknown-key.md",
-                "---\ntype: skill\ndescription: Skill.\nunknown: value\n---\n\n# Skill\n"
-            )
-            .contains("invalid YAML front matter")
-        );
     }
 
     #[test]
@@ -1138,6 +1168,7 @@ mod tests {
         fs::write(assets.join("zeta.txt"), "Zeta asset.\n").unwrap();
         let package = package(root, "provider", "1.0.0");
         let skill = Skill {
+            metadata: BTreeMap::new(),
             name: "provider-example".to_owned(),
             description: "Example skill.".to_owned(),
             package,
@@ -1169,6 +1200,7 @@ mod tests {
         let invalid_assets = root.join("invalid-assets");
         fs::write(&invalid_assets, "not a directory").unwrap();
         let invalid_skill = Skill {
+            metadata: BTreeMap::new(),
             assets: Some(invalid_assets),
             ..skill.clone()
         };
@@ -1352,7 +1384,7 @@ mod tests {
                 .to_string()
                 .contains("invalid skill registry")
         );
-        fs::write(&registry_path, r#"{"version": 2, "skills": {}}"#).unwrap();
+        fs::write(&registry_path, r#"{"version": 3, "skills": {}}"#).unwrap();
         assert!(
             load_registry(&registry_path)
                 .err()
@@ -1449,6 +1481,7 @@ mod tests {
             skills: BTreeMap::from([(
                 "provider-one".to_owned(),
                 SkillOwner {
+                    ecosystem: "cargo".to_owned(),
                     package: "different-provider".to_owned(),
                     version: "1.0.0".to_owned(),
                 },
@@ -1464,7 +1497,7 @@ mod tests {
                 .err()
                 .unwrap()
                 .to_string()
-                .contains("already installed from crate")
+                .contains("already installed from cargo package")
         );
 
         let directory = tempdir().unwrap();
@@ -1491,6 +1524,7 @@ mod tests {
                 (
                     "provider-stale".to_owned(),
                     SkillOwner {
+                        ecosystem: "cargo".to_owned(),
                         package: "provider".to_owned(),
                         version: "0.9.0".to_owned(),
                     },
@@ -1498,6 +1532,7 @@ mod tests {
                 (
                     "other-stale".to_owned(),
                     SkillOwner {
+                        ecosystem: "cargo".to_owned(),
                         package: "other".to_owned(),
                         version: "0.9.0".to_owned(),
                     },
@@ -1505,6 +1540,7 @@ mod tests {
                 (
                     "provider-vanished".to_owned(),
                     SkillOwner {
+                        ecosystem: "cargo".to_owned(),
                         package: "provider".to_owned(),
                         version: "0.8.0".to_owned(),
                     },
@@ -1546,6 +1582,7 @@ mod tests {
             skills: BTreeMap::from([(
                 "provider-stale".to_owned(),
                 SkillOwner {
+                    ecosystem: "cargo".to_owned(),
                     package: "provider".to_owned(),
                     version: "0.9.0".to_owned(),
                 },
@@ -1665,6 +1702,7 @@ mod tests {
                 (
                     "provider-example".to_owned(),
                     SkillOwner {
+                        ecosystem: "cargo".to_owned(),
                         package: "provider".to_owned(),
                         version: "0.9.0".to_owned(),
                     },
@@ -1672,6 +1710,7 @@ mod tests {
                 (
                     "provider-stale".to_owned(),
                     SkillOwner {
+                        ecosystem: "cargo".to_owned(),
                         package: "provider".to_owned(),
                         version: "0.9.0".to_owned(),
                     },
@@ -2093,5 +2132,159 @@ mod tests {
         assert!(error.contains("cannot update"), "{error}");
         assert!(!root.join(".agents/skills/provider-one").exists());
         assert!(!root.join(".agents/skills").join(REGISTRY_FILE).exists());
+    }
+
+    #[test]
+    fn preserves_extra_metadata_and_treats_resources_as_opaque_files() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let provider = package(root, "provider", "1.0.0");
+        write_skill(
+            &provider,
+            "workflow.md",
+            "---\ntype: skill\ndescription: Run workflow.\nlicense: MIT\nmetadata:\n  author: Provider\n---\n\n# Workflow\n",
+        );
+        write_skill(
+            &provider,
+            "workflow/references/guide.md",
+            "---\ntype: resource\nlayout: example\n---\n\n# Resource\n",
+        );
+        let installer = make_installer(root, vec![provider]);
+        install_skills(&installer, None, None).unwrap();
+        let installed =
+            fs::read_to_string(root.join(".agents/skills/provider-workflow/SKILL.md")).unwrap();
+        assert!(installed.contains("license: MIT"));
+        assert!(installed.contains("author: Provider"));
+        assert!(
+            root.join(".agents/skills/provider-workflow/references/guide.md")
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn shared_registry_preserves_foreign_owners_and_migrates_cargo_version_one() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let registry_path = root.join(".agents/skills").join(REGISTRY_FILE);
+        write(
+            root,
+            ".agents/skills/.agent-context-skills.json",
+            r#"{"version":1,"skills":{"provider-stale":{"package":"provider","version":"1.0.0"}}}"#,
+        );
+        let migrated = load_registry(&registry_path).unwrap();
+        assert_eq!(migrated.version, REGISTRY_VERSION);
+        assert_eq!(migrated.skills["provider-stale"].ecosystem, "cargo");
+        write(root, ".agents/skills/gem-workflow/SKILL.md", "Ruby skill");
+        write(
+            root,
+            ".agents/skills/.agent-context-skills.json",
+            r#"{"version":2,"skills":{"gem-workflow":{"ecosystem":"gem","package":"provider","version":"1.0.0"}}}"#,
+        );
+        let provider = package(root, "provider", "2.0.0");
+        write_skill(
+            &provider,
+            "workflow.md",
+            &skill_document("Cargo workflow.", "# Cargo\n"),
+        );
+        let installer = make_installer(root, vec![provider]);
+        install_skills(&installer, None, None).unwrap();
+        let registry = load_registry(&registry_path).unwrap();
+        assert_eq!(registry.skills["gem-workflow"].ecosystem, "gem");
+        assert_eq!(
+            fs::read_to_string(root.join(".agents/skills/gem-workflow/SKILL.md")).unwrap(),
+            "Ruby skill"
+        );
+        install_skills(&make_installer(root, Vec::new()), None, None).unwrap();
+        let registry = load_registry(&registry_path).unwrap();
+        assert_eq!(registry.skills.len(), 1);
+        assert!(registry.skills.contains_key("gem-workflow"));
+    }
+
+    #[test]
+    fn shared_registry_refuses_a_matching_name_owned_by_a_gem() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        write(
+            root,
+            ".agents/skills/.agent-context-skills.json",
+            r#"{"version":2,"skills":{"provider-workflow":{"ecosystem":"gem","package":"provider","version":"1.0.0"}}}"#,
+        );
+        write(
+            root,
+            ".agents/skills/provider-workflow/SKILL.md",
+            "Ruby skill",
+        );
+        let provider = package(root, "provider", "1.0.0");
+        write_skill(
+            &provider,
+            "workflow.md",
+            &skill_document("Cargo workflow.", "# Cargo\n"),
+        );
+        let installer = make_installer(root, vec![provider]);
+        assert!(install_skills(&installer, None, None).is_err());
+        assert_eq!(
+            fs::read_to_string(root.join(".agents/skills/provider-workflow/SKILL.md")).unwrap(),
+            "Ruby skill"
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_shared_owners_before_installation() {
+        for owner in [
+            r#"{"package":"provider","version":"1.0.0"}"#,
+            r#"{"ecosystem":"","package":"provider","version":"1.0.0"}"#,
+            r#"{"ecosystem":"cargo","package":"","version":"1.0.0"}"#,
+            r#"{"ecosystem":"cargo","package":"provider","version":""}"#,
+        ] {
+            let directory = tempdir().unwrap();
+            let root = directory.path();
+            let registry_path = root.join(".agents/skills").join(REGISTRY_FILE);
+            let previous_registry =
+                format!(r#"{{"version":2,"skills":{{"provider-workflow":{owner}}}}}"#);
+            write(
+                root,
+                ".agents/skills/.agent-context-skills.json",
+                &previous_registry,
+            );
+            write(
+                root,
+                ".agents/skills/provider-workflow/SKILL.md",
+                "Existing instructions",
+            );
+            let provider = package(root, "provider", "1.0.0");
+            write_skill(
+                &provider,
+                "workflow.md",
+                &skill_document("Workflow.", "# Workflow\n"),
+            );
+            let installer = make_installer(root, vec![provider]);
+            assert!(
+                install_skills(&installer, None, None)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("invalid owner")
+            );
+            assert_eq!(
+                fs::read_to_string(&registry_path).unwrap(),
+                previous_registry
+            );
+            assert_eq!(
+                fs::read_to_string(root.join(".agents/skills/provider-workflow/SKILL.md")).unwrap(),
+                "Existing instructions"
+            );
+        }
+    }
+
+    #[test]
+    fn reads_and_rewrites_the_portable_ownership_fixture_without_changing_owners() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let fixture = include_str!("../tests/fixtures/skill-ownership-index.json");
+        write(root, ".agents/skills/.agent-context-skills.json", fixture);
+        let registry_path = root.join(".agents/skills").join(REGISTRY_FILE);
+        let registry = load_registry(&registry_path).unwrap();
+        let encoded = serde_json::to_value(&registry).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        assert_eq!(encoded, expected);
     }
 }

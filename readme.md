@@ -97,3 +97,5 @@ Please open an issue or pull request on [GitHub](https://github.com/socketry/bak
 ### Agent Context
 
 Run `cargo bake agent:context:install` to install shared context and skills. Read `.agents/context/index.md` to find relevant guides, follow `agents.md` if present, and apply skills under `.agents/skills/`. The installer preserves repository-owned `agents.md`; it does not create or regenerate that file.
+
+The shared skill ownership index uses version-two JSON with ecosystem, package, and version fields. Cargo refreshes preserve gem-owned entries and reject conflicting ownership. Version-one Cargo ownership migrates when rewritten. See the portable specification for the shared format.

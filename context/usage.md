@@ -66,7 +66,7 @@ Follow the setup steps and use the bundled references when needed.
 
 The Markdown filename supplies the local skill name. Bake prefixes it with the Cargo package name, so `initial-gem-setup.md` in `my-crate` becomes `my-crate-initial-gem-setup/SKILL.md`. Files under the matching `context/initial-gem-setup/` directory are copied alongside it as skill resources. Bake generates the required YAML `name` and `description` fields in `SKILL.md`. Skill documents and their resource directories are installed only under `.agents/skills/`; they are omitted from `.agents/context/` and its index. In this crate, `context/usage.md` is installed as `bake-agent-context-usage/SKILL.md`.
 
-The supported front matter keys are `type` and `description`. The type must be `skill`; other types and unknown keys are rejected. There is no portable file-pattern field for skills, so describe the relevant tasks and files in `description`.
+The required skill front matter fields are `type: skill` and a non-empty `description`. Other types are rejected; additional metadata is preserved in the generated skill. Skill resources are copied without parsing their Markdown front matter. There is no portable file-pattern field for skills, so describe the relevant tasks and files in `description`.
 
 Run `cargo bake agent:context:install` to install ordinary context and all discovered skills. Use `--package CRATE` to install both from one provider. For independent skill management, `cargo bake agent:context:skill:install` installs all skills by default; `--package CRATE` selects one provider, `--skill NAME` selects one uniquely named skill using its package-prefixed name, and both select a skill from a specific crate. Run `cargo bake agent:context:skill:list` to discover available skills.
 
@@ -75,3 +75,5 @@ Installed skills live under `.agents/skills/`. Bake records ownership there so i
 See `.agents/context/index.md` for installed guidance from this and other providers, including the language-agnostic specification and recommendations for keeping package context separate from repository-owned instructions.
 
 The provider's `context/` directory is source content and should be versioned with the crate. It is different from `.agents/context/`, which is a generated copy installed into a consumer project.
+
+The shared skill ownership index uses version-two JSON with ecosystem, package, and version fields. Cargo refreshes preserve gem-owned entries and reject conflicting ownership. Version-one Cargo ownership migrates when rewritten. See the portable specification for the shared format.
