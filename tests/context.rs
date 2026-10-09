@@ -171,7 +171,6 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
     assert!(exclude.contains("# BEGIN bake-agent-context\n"));
     assert!(exclude.contains("/.agents/context/\n"));
-    assert!(exclude.contains("/.agents/skills/.agent-context-skills.json\n"));
     assert!(exclude.contains(&format!("/.agents/skills/{INSTALLED_SKILL_NAME}/\n")));
     assert!(exclude.contains("# END bake-agent-context\n"));
     assert!(!exclude.lines().any(|line| line == "/.agents/skills/"));
@@ -307,7 +306,6 @@ fn maintains_local_excludes_without_hiding_project_owned_skills() {
     let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
     assert_eq!(actual_gitignore, gitignore);
     assert!(exclude.contains("/.agents/context/\n"));
-    assert!(exclude.contains("/.agents/skills/.agent-context-skills.json\n"));
     assert!(exclude.contains(&format!("/.agents/skills/{INSTALLED_SKILL_NAME}/\n")));
     assert!(exclude.contains("# Local user rule\n*.local\n"));
     assert!(!exclude.lines().any(|line| line == "/.agents/skills/"));
@@ -657,26 +655,26 @@ fn selecting_one_skill_keeps_other_installed_skills() {
 
     let skills_root = root.join(".agents/skills");
     assert!(skills_root.join("docs-provider-secondary").is_dir());
-    let registry = fs::read_to_string(skills_root.join(".agent-context-skills.json")).unwrap();
-    assert!(registry.contains("docs-provider-secondary"));
+    let owner = fs::read_to_string(skills_root.join("docs-provider-secondary/skill.json")).unwrap();
+    assert!(owner.contains("docs-provider"));
 }
 
 #[cfg(unix)]
 #[test]
-fn reports_registry_read_and_skill_directory_creation_errors() {
+fn reports_ownership_read_and_skill_directory_creation_errors() {
     let (_directory, root) = project();
-    let registry_path = root.join(".agents/skills/.agent-context-skills.json");
+    let ownership_path = root.join(".agents/skills/provider-workflow/skill.json");
     write(
         &root,
-        ".agents/skills/.agent-context-skills.json",
-        "{\"version\":1,\"skills\":{}}\n",
+        ".agents/skills/provider-workflow/skill.json",
+        r#"{"ecosystem":"cargo","package":"provider","version":"1"}"#,
     );
-    fs::set_permissions(&registry_path, fs::Permissions::from_mode(0o000)).unwrap();
+    fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o000)).unwrap();
     let installer = Installer::new(&root).unwrap();
     let error = install_skills(&installer, None, None)
         .unwrap_err()
         .to_string();
-    fs::set_permissions(&registry_path, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o600)).unwrap();
     assert!(error.contains("cannot read"), "{error}");
 
     let (_directory, root) = project();
@@ -862,7 +860,7 @@ fn rejects_non_regular_skill_assets_in_the_dependency_build() {
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("reserved for the generated skill instructions"),
+        error.contains("reserved for generated skill files"),
         "{error}"
     );
 
@@ -931,7 +929,7 @@ fn reports_public_index_installer_and_cargo_metadata_errors() {
 }
 
 #[test]
-fn rejects_invalid_skill_registries_and_installation_paths() {
+fn rejects_invalid_skill_ownership_and_installation_paths() {
     let (_directory, root) = project();
     let skills_root = root.join(".agents/skills");
     fs::create_dir_all(root.join(".agents")).unwrap();
@@ -946,25 +944,29 @@ fn rejects_invalid_skill_registries_and_installation_paths() {
 
     let (_directory, root) = project();
     let installer = Installer::new(&root).unwrap();
-    let registry_path = root.join(".agents/skills/.agent-context-skills.json");
+    let ownership_path = root.join(".agents/skills/provider-workflow/skill.json");
     write(
         &root,
-        ".agents/skills/.agent-context-skills.json",
+        ".agents/skills/provider-workflow/skill.json",
         "{invalid json}",
     );
     assert!(
         install_skills(&installer, None, None)
             .unwrap_err()
             .to_string()
-            .contains("invalid skill registry")
+            .contains("invalid skill ownership")
     );
 
-    fs::write(&registry_path, r#"{"version":3,"skills":{}}"#).unwrap();
+    fs::write(
+        &ownership_path,
+        r#"{"ecosystem":"cargo","package":" ","version":"1"}"#,
+    )
+    .unwrap();
     assert!(
         install_skills(&installer, None, None)
             .unwrap_err()
             .to_string()
-            .contains("unsupported skill registry version")
+            .contains("invalid owner")
     );
 }
 

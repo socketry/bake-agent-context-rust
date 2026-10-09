@@ -424,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_index_directory_and_registry_errors() {
+    fn reports_index_directory_and_ownership_errors() {
         let directory = tempdir().unwrap();
         let index = ContextIndex::new(directory.path());
         fs::write(directory.path().join(".agents"), "not a directory").unwrap();
@@ -441,7 +441,7 @@ mod tests {
         let directory = tempdir().unwrap();
         write(
             directory.path(),
-            ".agents/skills/.agent-context-skills.json",
+            ".agents/skills/provider-workflow/skill.json",
             "{invalid json}",
         );
         assert!(ContextIndex::new(directory.path()).update_index().is_err());
