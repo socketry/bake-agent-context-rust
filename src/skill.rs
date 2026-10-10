@@ -660,12 +660,15 @@ fn load_skill_owner(directory: &Path) -> Result<Option<SkillOwner>> {
     }
     let bytes = filesystem::read(&path)
         .map_err(|error| Error::new(format!("cannot read {}: {error}", path.display())))?;
-    let owner: SkillOwner = serde_json::from_slice(&bytes).map_err(|error| {
-        Error::new(format!(
-            "invalid skill ownership {}: {error}",
-            path.display()
-        ))
-    })?;
+    let owner: SkillOwner =
+        serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes)
+            .and_then(|object| serde_json::from_value(serde_json::Value::Object(object)))
+            .map_err(|error| {
+                Error::new(format!(
+                    "invalid skill ownership {}: {error}",
+                    path.display()
+                ))
+            })?;
     if owner.ecosystem.trim().is_empty()
         || owner.package.trim().is_empty()
         || owner.version.trim().is_empty()
@@ -2034,6 +2037,7 @@ mod tests {
     #[test]
     fn rejects_incomplete_owners_before_installation() {
         for invalid in [
+            r#"["cargo","provider","1.0.0"]"#,
             r#"{"package":"provider","version":"1.0.0"}"#,
             r#"{"ecosystem":" ","package":"provider","version":"1.0.0"}"#,
             r#"{"ecosystem":"cargo","package":"","version":"1.0.0"}"#,
