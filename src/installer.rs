@@ -57,13 +57,13 @@ pub struct Installer {
 
 impl Installer {
     /// Resolve the project's Cargo packages and find dependencies with `context/` directories.
-    pub fn new(root: impl Into<PathBuf>) -> Result<Self> {
+    pub fn discover(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
         let cargo = cargo_executable(env::var_os("CARGO"));
-        Self::new_with_cargo(root, cargo)
+        Self::discover_with_cargo(root, cargo)
     }
 
-    fn new_with_cargo(root: PathBuf, cargo: OsString) -> Result<Self> {
+    fn discover_with_cargo(root: PathBuf, cargo: OsString) -> Result<Self> {
         let manifest = root.join("Cargo.toml");
         let output = run_cargo_metadata(&root, &cargo)?;
         if !output.status.success() {
@@ -75,7 +75,7 @@ impl Installer {
         }
 
         let metadata = parse_metadata(&output.stdout)?;
-        Self::from_metadata(root, metadata)
+        Self::discover_from_metadata(root, metadata)
     }
 
     #[cfg(test)]
@@ -87,7 +87,7 @@ impl Installer {
         }
     }
 
-    fn from_metadata(root: PathBuf, metadata: CargoMetadata) -> Result<Self> {
+    fn discover_from_metadata(root: PathBuf, metadata: CargoMetadata) -> Result<Self> {
         let workspace_members: HashSet<_> = metadata.workspace_members.into_iter().collect();
         let resolved_packages: HashSet<_> = metadata
             .resolve
@@ -594,10 +594,10 @@ mod tests {
     #[test]
     fn reports_cargo_execution_status_and_json_errors() {
         let directory = tempdir().unwrap();
-        let error = Installer::new(directory.path()).err().unwrap();
+        let error = Installer::discover(directory.path()).err().unwrap();
         assert!(error.to_string().contains("cargo metadata failed"));
 
-        let error = Installer::new_with_cargo(
+        let error = Installer::discover_with_cargo(
             directory.path().to_path_buf(),
             directory.path().join("missing-cargo").into_os_string(),
         )
@@ -628,7 +628,7 @@ mod tests {
     fn reports_metadata_parse_errors_from_cargo() {
         let directory = tempdir().unwrap();
         let error =
-            Installer::new_with_cargo(directory.path().to_path_buf(), "/usr/bin/true".into())
+            Installer::discover_with_cargo(directory.path().to_path_buf(), "/usr/bin/true".into())
                 .unwrap_err();
         assert!(error.to_string().contains("cannot parse cargo metadata"));
     }
@@ -698,7 +698,7 @@ mod tests {
                 ],
             }),
         };
-        let installer = Installer::from_metadata(root.to_path_buf(), metadata).unwrap();
+        let installer = Installer::discover_from_metadata(root.to_path_buf(), metadata).unwrap();
 
         assert_eq!(installer.root(), root);
         assert_eq!(installer.context_path(), root.join(".agents/context"));
@@ -756,7 +756,7 @@ mod tests {
             ],
             resolve: None,
         };
-        let installer = Installer::from_metadata(root.to_path_buf(), metadata).unwrap();
+        let installer = Installer::discover_from_metadata(root.to_path_buf(), metadata).unwrap();
         assert_eq!(installer.packages().len(), 1);
         assert_eq!(installer.packages()[0].selector(), "valid");
     }
@@ -778,7 +778,7 @@ mod tests {
             )],
             resolve: None,
         };
-        assert!(Installer::from_metadata(root.to_path_buf(), metadata).is_err());
+        assert!(Installer::discover_from_metadata(root.to_path_buf(), metadata).is_err());
     }
 
     #[test]

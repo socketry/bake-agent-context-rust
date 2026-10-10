@@ -20,7 +20,7 @@ fn installer(context: &mut Context) -> Result<Installer> {
         return Ok(installer.clone());
     }
 
-    let installer = Installer::new(context.root())?;
+    let installer = Installer::discover(context.root())?;
     context.insert(installer.clone());
     Ok(installer)
 }
