@@ -148,11 +148,11 @@ Common file names:
 
 ### 4.4 Skill Documents
 
-A context provider may distribute an Agent Skill as a Markdown document directly inside `context/`. The document MUST use YAML front matter with `type: skill` and a non-empty `description`. Its filename, without the `.md` extension, is the local skill name. A directory with the same name MAY contain skill resources. Consumers MUST prefix the local name with the provider package name and a hyphen to produce the globally unique installed skill name.
+A context provider may distribute an Agent Skill as a Markdown document directly inside `context/`. The document MUST use YAML front matter with `type: skill` and a non-empty `description`. Its filename, without the `.md` extension, is the local skill name. A directory with the same name MAY contain skill resources. Consumers MUST prefix the local name with the lowercase provider package name (with underscores normalized to hyphens) and a hyphen to produce the installed skill name. Installed names MUST use lowercase ASCII letters, digits, and single hyphens, contain 1–64 characters, and begin and end with a letter or digit. Descriptions MUST contain 1–1,024 characters after trimming whitespace. Consumers MUST validate these fields and preserve additional skill metadata; generated installed names take precedence over a source `name` field.
 
 Consumers that support skills MUST install the document as `.agents/skills/<package-name>-<local-name>/SKILL.md`, with the installed name and `description` in its front matter. Files in the matching resource directory MUST be copied into that skill directory. Skill documents and their resources MUST NOT also be copied into `.agents/context/` or included in the generated context index.
 
-Dependency-installed skill directories SHOULD be excluded from version control, while project-owned skills in `.agents/skills/` SHOULD remain trackable. Git integrations SHOULD add exact dependency-installed skill paths to `.git/info/exclude` rather than ignore the entire `.agents/skills/` directory. They SHOULD mark generated entries with comments and preserve user-authored rules outside that marked section. Any generated skill ownership registry SHOULD also be excluded from version control.
+Dependency-installed skill directories SHOULD be excluded from version control, while project-owned skills in `.agents/skills/` SHOULD remain trackable. Git integrations SHOULD add exact dependency-installed skill paths to `.git/info/exclude` rather than ignore the entire `.agents/skills/` directory. They SHOULD mark generated entries with comments and preserve user-authored rules outside that marked section.
 
 ## 5. Discovery and Installation
 
@@ -194,3 +194,37 @@ FOR each package with context:
       COPY it into .agents/context/package-name/, preserving its relative path
 END
 ```
+
+## 6. Generated Index and Repository Ownership
+
+Consumers SHOULD generate `.agents/context/index.md` with links relative to that file. Context installation MUST NOT create or modify the repository owner's `agents.md`. Owners can link to the generated index and instruct agents to read relevant installed guidance.
+
+Ordinary documents need no front matter. Consumers SHOULD use a document's first heading as its title (falling back to the filename) and its first prose sentence as its description. A non-empty YAML `description` takes precedence over prose. Unrelated ordinary-document metadata MUST be tolerated. Skill resource files are opaque assets and MUST NOT be parsed as context documents.
+
+A provider MAY supply `context/index.yaml` with `description` and a `files` sequence containing `path`, `title`, and `description`. Supporting consumers SHOULD preserve explicit ordering and overrides, omit missing or skill-only paths, and append unlisted ordinary documents. Fallback ordering is getting-started, overview, usage, configuration, migration, troubleshooting, debugging, then alphabetical order.
+
+## 7. Skill Installation Ownership
+
+Consumers MUST write `skill.json` inside each dependency-installed skill directory, alongside `SKILL.md`:
+
+```json
+{
+  "ecosystem": "cargo",
+  "package": "provider",
+  "version": "1.0.0"
+}
+```
+
+`SKILL.md` provides agent-facing metadata and instructions. `skill.json` records installation ownership.
+
+The ownership record MUST be a JSON object with non-empty string fields `ecosystem`, `package`, and `version`; whitespace-only values are invalid. Consumers MUST tolerate additional fields. Ruby gems use `ecosystem: gem`; Cargo crates use `ecosystem: cargo`. `package` is the provider's package name and `version` is the installed provider version.
+
+Consumers MUST discover installed ownership by scanning direct child directories of `.agents/skills/` for `skill.json`. The skills root and managed skill directories MUST be regular directories. Symbolic links and non-directory children are skipped. Ownership files MUST be regular files. Managed directory names MUST satisfy the installed skill name rules in section 4.4. Malformed or unreadable ownership MUST fail the operation before installed skills are changed. A directory without `skill.json` is project-owned.
+
+A full refresh reconciles only the installer's ecosystem; a package refresh reconciles only that ecosystem and package; installing one named skill retains other owned skills. Full reconciliation includes providers removed from the dependency graph and providers that become empty. Installers MUST retain skills owned by other ecosystems.
+
+Existing project-owned destinations and destinations owned by another ecosystem or package MUST NOT be replaced. Installers MUST validate selected sources and collisions, stage instructions, resources, and ownership together, and replace each skill directory by renaming the staged directory. They MUST restore previous directories, ownership, and Git exclusions if a replacement fails.
+
+Top-level resource names `SKILL.md` and `skill.json` are reserved, case-insensitively, for generated files. Consumers MUST reject provider resources with either name, including directories. Nested resource files with these names MAY be copied as opaque assets.
+
+Git integrations SHOULD maintain one marked exclusion block per consuming project, covering generated context and exact dependency-owned skill directories from all ecosystems. Exclusion paths MUST be relative to the Git repository root. Nested projects SHOULD identify their block by appending the repository-relative project path, with a trailing slash, to the `# BEGIN bake-agent-context` and `# END bake-agent-context` markers. They MUST retain user-authored rules and blocks belonging to other projects. The ownership file is excluded with its containing skill directory.

@@ -155,10 +155,7 @@ mod tests {
             .unwrap();
         assert!(output.contains("No dependency context or skills were installed"));
         assert!(root.join(".agents/context/index.md").is_file());
-        assert!(
-            root.join(".agents/skills/.agent-context-skills.json")
-                .is_file()
-        );
+        assert!(root.join(".agents/skills").is_dir());
 
         let registry = Registry::discover().unwrap();
         let error = registry
@@ -259,20 +256,24 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn reports_skill_registry_read_and_directory_creation_errors() {
+    fn reports_skill_ownership_read_and_directory_creation_errors() {
         let project = temporary_project_with_context_provider();
         let root = project.path();
-        let registry_path = root.join(".agents/skills/.agent-context-skills.json");
-        fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
-        fs::write(&registry_path, "{\"version\":1,\"skills\":{}}\n").unwrap();
-        fs::set_permissions(&registry_path, fs::Permissions::from_mode(0o000)).unwrap();
+        let ownership_path = root.join(".agents/skills/docs-provider-workflow/skill.json");
+        fs::create_dir_all(ownership_path.parent().unwrap()).unwrap();
+        fs::write(
+            &ownership_path,
+            r#"{"ecosystem":"cargo","package":"docs-provider","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o000)).unwrap();
 
         let error = Registry::discover()
             .unwrap()
             .run_arguments(root, &["agent:context:skill:install".to_owned()])
             .unwrap_err()
             .to_string();
-        fs::set_permissions(&registry_path, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o600)).unwrap();
         assert!(error.contains("cannot read"), "{error}");
 
         let project = temporary_project_with_context_provider();

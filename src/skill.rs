@@ -14,8 +14,7 @@ use std::fs as filesystem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
-const REGISTRY_VERSION: u32 = 1;
-const REGISTRY_FILE: &str = ".agent-context-skills.json";
+const OWNERSHIP_FILE: &str = "skill.json";
 static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// A skill declared by a Markdown file in a dependency's `context/` directory.
@@ -28,6 +27,7 @@ pub struct Skill {
     pub(crate) source_name: String,
     assets: Option<PathBuf>,
     body: String,
+    metadata: BTreeMap<String, serde_yaml_ng::Value>,
 }
 
 impl Skill {
@@ -38,38 +38,27 @@ impl Skill {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ContextFrontmatter {
     #[serde(rename = "type")]
     document_type: Option<String>,
     description: Option<String>,
+    #[serde(flatten)]
+    metadata: BTreeMap<String, serde_yaml_ng::Value>,
 }
 
 #[derive(Serialize)]
 struct SkillFrontmatter<'a> {
     name: &'a str,
     description: &'a str,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct Registry {
-    version: u32,
-    skills: BTreeMap<String, SkillOwner>,
+    #[serde(flatten)]
+    metadata: &'a BTreeMap<String, serde_yaml_ng::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct SkillOwner {
+    ecosystem: String,
     package: String,
     version: String,
-}
-
-impl Default for Registry {
-    fn default() -> Self {
-        Self {
-            version: REGISTRY_VERSION,
-            skills: BTreeMap::new(),
-        }
-    }
 }
 
 /// Find context documents marked with `type: skill` in YAML front matter.
@@ -109,9 +98,22 @@ fn compare_skills(left: &Skill, right: &Skill) -> Comparison {
 pub(crate) fn list_package_skills(package: &ContextPackage) -> Result<Vec<Skill>> {
     let mut skills = Vec::new();
     let mut files = markdown_files(&package.context_path)?;
-    files.sort();
+    files.sort_by_key(|path| {
+        (
+            path.parent() != Some(package.context_path.as_path()),
+            path.clone(),
+        )
+    });
 
     for source in files {
+        if skills.iter().any(|skill: &Skill| {
+            skill
+                .assets
+                .as_ref()
+                .is_some_and(|assets| source.starts_with(assets))
+        }) {
+            continue;
+        }
         let contents = filesystem::read_to_string(&source)
             .map_err(|error| Error::new(format!("cannot read {}: {error}", source.display())))?;
         if let Some(skill) = parse_skill_document(package, &source, &contents)? {
@@ -186,6 +188,11 @@ fn parse_skill_document(
         source_name,
         assets,
         body,
+        metadata: {
+            let mut metadata = frontmatter.metadata;
+            metadata.remove("name");
+            metadata
+        },
     }))
 }
 
@@ -217,9 +224,8 @@ fn skill_body(document: &mut Node) -> String {
 
 /// Install skills from all providers, one provider, or one named skill.
 ///
-/// If both filters are omitted, all discovered skills are installed. Existing
-/// project-owned skill directories are never replaced; installed dependency
-/// skills are tracked in a registry under `.agents/skills/`.
+/// If both filters are omitted, all discovered skills are installed.
+/// Dependency skill ownership is recorded in each installed directory’s `skill.json`.
 pub fn install_skills(
     installer: &Installer,
     package_selector: Option<&str>,
@@ -283,8 +289,7 @@ pub fn install_skills(
 
     let skills_root = installer.root().join(".agents/skills");
     ensure_directory(&skills_root)?;
-    let registry_path = skills_root.join(REGISTRY_FILE);
-    let (mut registry, had_registry) = load_registry_with_existence(&registry_path)?;
+    let owners = installed_skill_owners(&skills_root)?;
 
     let selected_by_name: HashMap<_, _> = skills
         .iter()
@@ -293,12 +298,12 @@ pub fn install_skills(
 
     let mut destination_exists = HashMap::new();
     for skill in &skills {
-        if let Some(owner) = registry.skills.get(&skill.name)
-            && owner.package != skill.package.name
+        if let Some(owner) = owners.get(&skill.name)
+            && (owner.ecosystem != "cargo" || owner.package != skill.package.name)
         {
             return Err(Error::new(format!(
-                "skill {:?} is already installed from crate {:?}; it cannot be replaced by {:?}",
-                skill.name, owner.package, skill.package.name
+                "skill {:?} is already installed from {} package {:?}; it cannot be replaced by Cargo package {:?}",
+                skill.name, owner.ecosystem, owner.package, skill.package.name
             )));
         }
 
@@ -306,10 +311,9 @@ pub fn install_skills(
         let exists = path_exists(&destination)?;
         destination_exists.insert(skill.name.clone(), exists);
         if exists
-            && registry
-                .skills
-                .get(&skill.name)
-                .is_none_or(|owner| owner.package != skill.package.name)
+            && owners.get(&skill.name).is_none_or(|owner| {
+                owner.ecosystem != "cargo" || owner.package != skill.package.name
+            })
         {
             return Err(Error::new(format!(
                 "skill destination {} already exists and is not managed by Bake Agent Context",
@@ -318,11 +322,11 @@ pub fn install_skills(
         }
     }
 
-    let stale_skills: Vec<_> = registry
-        .skills
+    let stale_skills: Vec<_> = owners
         .iter()
         .filter(|(name, owner)| {
-            !selected_by_name.contains_key(name.as_str())
+            owner.ecosystem == "cargo"
+                && !selected_by_name.contains_key(name.as_str())
                 && (reconcile_all
                     || match reconcile_package {
                         Some(package) => owner.package == package,
@@ -331,27 +335,11 @@ pub fn install_skills(
         })
         .map(|(name, _)| name.clone())
         .collect();
-    let mut stale_exists = HashMap::new();
-    for name in &stale_skills {
-        stale_exists.insert(name.clone(), path_exists(&skills_root.join(name))?);
-    }
-
-    for name in &stale_skills {
-        registry.skills.remove(name);
-    }
-    for skill in &skills {
-        registry.skills.insert(
-            skill.name.clone(),
-            SkillOwner {
-                package: skill.package.name.clone(),
-                version: skill.package.version.clone(),
-            },
-        );
-    }
-    let encoded_registry = serde_json::to_vec_pretty(&registry)
-        .expect("the skill registry contains only serializable values");
-    let exclude_update =
-        super::exclude::prepare(installer.root(), registry.skills.keys().cloned())?;
+    let remaining_names = owners.keys().filter(|name| !stale_skills.contains(name));
+    let skill_names = remaining_names
+        .cloned()
+        .chain(skills.iter().map(|skill| skill.name.clone()));
+    let exclude_update = super::exclude::prepare(installer.root(), skill_names)?;
 
     let stage = staging_path(&skills_root);
     filesystem::create_dir(&stage)
@@ -376,7 +364,7 @@ pub fn install_skills(
         }
     }
 
-    if let Err(error) = apply_exclude_update(exclude_update) {
+    if let Err(error) = apply_exclude_update(exclude_update.as_ref()) {
         let _ = filesystem::remove_dir_all(&stage);
         return Err(error);
     }
@@ -388,6 +376,9 @@ pub fn install_skills(
         let had_previous = destination_exists[&skill.name];
         if had_previous && let Err(error) = filesystem::rename(&destination, &backup) {
             rollback(&skills_root, &backups, &changes);
+            if let Some(update) = &exclude_update {
+                let _ = update.restore();
+            }
             let _ = filesystem::remove_dir_all(&stage);
             return Err(Error::new(format!(
                 "cannot move existing skill {}: {error}",
@@ -400,6 +391,9 @@ pub fn install_skills(
                 let _ = filesystem::rename(&backup, &destination);
             }
             rollback(&skills_root, &backups, &changes);
+            if let Some(update) = &exclude_update {
+                let _ = update.restore();
+            }
             let _ = filesystem::remove_dir_all(&stage);
             return Err(Error::new(format!(
                 "cannot install skill {}: {error}",
@@ -414,49 +408,18 @@ pub fn install_skills(
 
     for name in &stale_skills {
         let destination = skills_root.join(name);
-        if stale_exists[name] {
-            if let Err(error) = filesystem::rename(&destination, backups.join(name)) {
-                rollback(&skills_root, &backups, &changes);
-                let _ = filesystem::remove_dir_all(&stage);
-                return Err(Error::new(format!(
-                    "cannot remove stale installed skill {}: {error}",
-                    destination.display()
-                )));
+        if let Err(error) = filesystem::rename(&destination, backups.join(name)) {
+            rollback(&skills_root, &backups, &changes);
+            if let Some(update) = &exclude_update {
+                let _ = update.restore();
             }
-            changes.push(AppliedChange::Removed { name: name.clone() });
+            let _ = filesystem::remove_dir_all(&stage);
+            return Err(Error::new(format!(
+                "cannot remove stale installed skill {}: {error}",
+                destination.display()
+            )));
         }
-    }
-
-    let staged_registry = stage.join("registry.json");
-    if let Err(error) = filesystem::write(&staged_registry, encoded_registry) {
-        rollback(&skills_root, &backups, &changes);
-        let _ = filesystem::remove_dir_all(&stage);
-        return Err(Error::new(format!(
-            "cannot write staged skill registry {}: {error}",
-            staged_registry.display()
-        )));
-    }
-
-    if had_registry
-        && let Err(error) = filesystem::rename(&registry_path, backups.join("registry.json"))
-    {
-        rollback(&skills_root, &backups, &changes);
-        let _ = filesystem::remove_dir_all(&stage);
-        return Err(Error::new(format!(
-            "cannot move existing skill registry {}: {error}",
-            registry_path.display()
-        )));
-    }
-    if let Err(error) = filesystem::rename(&staged_registry, &registry_path) {
-        if had_registry {
-            let _ = filesystem::rename(backups.join("registry.json"), &registry_path);
-        }
-        rollback(&skills_root, &backups, &changes);
-        let _ = filesystem::remove_dir_all(&stage);
-        return Err(Error::new(format!(
-            "cannot update skill registry {}: {error}",
-            registry_path.display()
-        )));
+        changes.push(AppliedChange::Removed { name: name.clone() });
     }
 
     filesystem::remove_dir_all(&stage)
@@ -468,7 +431,7 @@ pub fn install_skills(
         .collect())
 }
 
-fn apply_exclude_update(update: Option<super::exclude::Update>) -> Result<()> {
+fn apply_exclude_update(update: Option<&super::exclude::Update>) -> Result<()> {
     if let Some(update) = update {
         update.apply()?;
     }
@@ -554,9 +517,10 @@ fn write_staged_skill(skill: &Skill, destination: &Path) -> Result<()> {
     let metadata = SkillFrontmatter {
         name: &skill.name,
         description: &skill.description,
+        metadata: &skill.metadata,
     };
     let yaml = serde_yaml_ng::to_string(&metadata)
-        .expect("skill front matter contains only serializable strings");
+        .expect("skill front matter contains only serializable YAML values");
     let mut output = format!("---\n{yaml}---\n\n");
     output.push_str(&skill.body);
     if !output.ends_with('\n') {
@@ -565,7 +529,15 @@ fn write_staged_skill(skill: &Skill, destination: &Path) -> Result<()> {
 
     let skill_file = destination.join("SKILL.md");
     filesystem::write(&skill_file, output)
-        .map_err(|error| Error::new(format!("cannot write {}: {error}", skill_file.display())))
+        .map_err(|error| Error::new(format!("cannot write {}: {error}", skill_file.display())))?;
+    write_skill_owner(
+        destination,
+        &SkillOwner {
+            ecosystem: "cargo".to_owned(),
+            package: skill.package.name.clone(),
+            version: skill.package.version.clone(),
+        },
+    )
 }
 
 fn copy_skill_assets(source: &Path, destination: &Path, top_level: bool) -> Result<()> {
@@ -587,6 +559,16 @@ fn copy_skill_asset(source: &Path, destination: &Path, top_level: bool) -> Resul
     let metadata = inspect_skill_asset(source)?;
     let file_type = metadata.file_type();
 
+    let name = source.file_name().unwrap_or_default().to_string_lossy();
+    if top_level
+        && (name.eq_ignore_ascii_case("SKILL.md") || name.eq_ignore_ascii_case(OWNERSHIP_FILE))
+    {
+        return Err(Error::new(format!(
+            "{} is reserved for generated skill files",
+            source.display()
+        )));
+    }
+
     if file_type.is_symlink() {
         return Err(Error::new(format!(
             "skill assets cannot contain symbolic links: {}",
@@ -598,18 +580,6 @@ fn copy_skill_asset(source: &Path, destination: &Path, top_level: bool) -> Resul
         })?;
         copy_skill_assets(source, destination, false)?;
     } else if file_type.is_file() {
-        if top_level
-            && source
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .eq_ignore_ascii_case("SKILL.md")
-        {
-            return Err(Error::new(format!(
-                "{} is reserved for the generated skill instructions",
-                source.display()
-            )));
-        }
         filesystem::copy(source, destination)
             .map(|_| ())
             .map_err(|error| {
@@ -657,61 +627,89 @@ fn ensure_directory(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn installed_skill_names(root: &Path) -> Result<Vec<String>> {
-    let registry_path = root.join(".agents/skills").join(REGISTRY_FILE);
-    let registry = load_registry(&registry_path)?;
-    Ok(registry.skills.keys().cloned().collect())
+    Ok(installed_skill_owners(&root.join(".agents/skills"))?
+        .into_keys()
+        .collect())
 }
 
-fn load_registry(path: &Path) -> Result<Registry> {
-    load_registry_with_existence(path).map(|(registry, _)| registry)
+fn write_skill_owner(directory: &Path, owner: &SkillOwner) -> Result<()> {
+    let path = directory.join(OWNERSHIP_FILE);
+    let mut bytes = serde_json::to_vec_pretty(owner).expect("skill ownership is serializable");
+    bytes.push(b'\n');
+    filesystem::write(&path, bytes)
+        .map_err(|error| Error::new(format!("cannot write {}: {error}", path.display())))
 }
 
-fn load_registry_with_existence(path: &Path) -> Result<(Registry, bool)> {
-    let metadata = match filesystem::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok((Registry::default(), false));
+fn load_skill_owner(directory: &Path) -> Result<Option<SkillOwner>> {
+    let path = directory.join(OWNERSHIP_FILE);
+    match filesystem::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_file() => {}
+        Ok(_) => {
+            return Err(Error::new(format!(
+                "skill ownership {} is not a regular file",
+                path.display()
+            )));
         }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
             return Err(Error::new(format!(
                 "cannot inspect {}: {error}",
                 path.display()
             )));
         }
-    };
-    if !metadata.file_type().is_file() {
-        return Err(Error::new(format!(
-            "skill registry {} is not a regular file",
-            path.display()
-        )));
     }
+    let bytes = filesystem::read(&path)
+        .map_err(|error| Error::new(format!("cannot read {}: {error}", path.display())))?;
+    let owner: SkillOwner =
+        serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes)
+            .and_then(|object| serde_json::from_value(serde_json::Value::Object(object)))
+            .map_err(|error| {
+                Error::new(format!(
+                    "invalid skill ownership {}: {error}",
+                    path.display()
+                ))
+            })?;
+    if owner.ecosystem.trim().is_empty()
+        || owner.package.trim().is_empty()
+        || owner.version.trim().is_empty()
+    {
+        return Err(Error::new(format!("invalid owner in {}", path.display())));
+    }
+    Ok(Some(owner))
+}
 
-    let bytes = match filesystem::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
+fn installed_skill_owners(root: &Path) -> Result<BTreeMap<String, SkillOwner>> {
+    match filesystem::symlink_metadata(root) {
+        Ok(metadata) if metadata.file_type().is_dir() => {}
+        Ok(_) => {
             return Err(Error::new(format!(
-                "cannot read {}: {error}",
-                path.display()
+                "skill installation path {} is not a regular directory",
+                root.display()
             )));
         }
-    };
-    let registry: Registry = serde_json::from_slice(&bytes).map_err(|error| {
-        Error::new(format!(
-            "invalid skill registry {}: {error}",
-            path.display()
-        ))
-    })?;
-    if registry.version != REGISTRY_VERSION {
-        return Err(Error::new(format!(
-            "unsupported skill registry version {} in {}",
-            registry.version,
-            path.display()
-        )));
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(error) => {
+            return Err(Error::new(format!(
+                "cannot inspect {}: {error}",
+                root.display()
+            )));
+        }
     }
-    for name in registry.skills.keys() {
-        validate_skill_name(name)?;
+    let entries = filesystem::read_dir(root)
+        .map_err(|error| Error::new(format!("cannot read {}: {error}", root.display())))?;
+    let mut owners = BTreeMap::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        if let Some(owner) = load_skill_owner(&entry.path())? {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            validate_skill_name(&name)?;
+            owners.insert(name, owner);
+        }
     }
-    Ok((registry, true))
+    Ok(owners)
 }
 
 fn path_exists(path: &Path) -> Result<bool> {
@@ -927,14 +925,6 @@ mod tests {
             )
             .contains("1024 character limit")
         );
-        assert!(
-            error_for_document(
-                "provider",
-                "unknown-key.md",
-                "---\ntype: skill\ndescription: Skill.\nunknown: value\n---\n\n# Skill\n"
-            )
-            .contains("invalid YAML front matter")
-        );
     }
 
     #[test]
@@ -1138,6 +1128,7 @@ mod tests {
         fs::write(assets.join("zeta.txt"), "Zeta asset.\n").unwrap();
         let package = package(root, "provider", "1.0.0");
         let skill = Skill {
+            metadata: BTreeMap::new(),
             name: "provider-example".to_owned(),
             description: "Example skill.".to_owned(),
             package,
@@ -1169,6 +1160,7 @@ mod tests {
         let invalid_assets = root.join("invalid-assets");
         fs::write(&invalid_assets, "not a directory").unwrap();
         let invalid_skill = Skill {
+            metadata: BTreeMap::new(),
             assets: Some(invalid_assets),
             ..skill.clone()
         };
@@ -1237,7 +1229,7 @@ mod tests {
     #[test]
     fn rejects_symlinks_reserved_files_and_unsupported_skill_assets() {
         use std::os::unix::fs::symlink;
-        use std::os::unix::net::UnixListener;
+        use std::process::Command;
 
         let directory = tempdir().unwrap();
         let root = directory.path();
@@ -1268,7 +1260,13 @@ mod tests {
 
         fs::remove_file(assets.join("skill.MD")).unwrap();
         let socket_path = assets.join("socket");
-        let _listener = UnixListener::bind(&socket_path).unwrap();
+        assert!(
+            Command::new("mkfifo")
+                .arg(&socket_path)
+                .status()
+                .unwrap()
+                .success()
+        );
         assert!(
             copy_skill_assets(&assets, &destination, true)
                 .err()
@@ -1276,20 +1274,24 @@ mod tests {
                 .to_string()
                 .contains("unsupported skill asset")
         );
-        drop(_listener);
         fs::remove_file(socket_path).unwrap();
 
         let nested = assets.join("nested");
         fs::create_dir(&nested).unwrap();
         let nested_socket_path = nested.join("socket");
-        let nested_listener = UnixListener::bind(&nested_socket_path).unwrap();
+        assert!(
+            Command::new("mkfifo")
+                .arg(&nested_socket_path)
+                .status()
+                .unwrap()
+                .success()
+        );
         assert!(
             copy_skill_assets(&assets, &destination, true)
                 .unwrap_err()
                 .to_string()
                 .contains("unsupported skill asset")
         );
-        drop(nested_listener);
         fs::remove_file(nested_socket_path).unwrap();
         fs::remove_dir(nested).unwrap();
 
@@ -1320,75 +1322,42 @@ mod tests {
     }
 
     #[test]
-    fn validates_skill_registry_and_installation_directory_states() {
+    fn validates_skill_ownership_and_installation_directory_states() {
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let registry_path = root.join("registry.json");
-        assert_eq!(
-            load_registry(&registry_path).unwrap().version,
-            REGISTRY_VERSION
-        );
-        assert!(
-            !load_registry_with_existence(&root.join("absent.json"))
-                .unwrap()
-                .1
-        );
+        assert!(load_skill_owner(root).unwrap().is_none());
         assert!(installed_skill_names(root).unwrap().is_empty());
-
-        fs::create_dir(&registry_path).unwrap();
+        let marker = root.join(OWNERSHIP_FILE);
+        fs::create_dir(&marker).unwrap();
         assert!(
-            load_registry(&registry_path)
-                .err()
-                .unwrap()
+            load_skill_owner(root)
+                .unwrap_err()
                 .to_string()
                 .contains("not a regular file")
         );
-        fs::remove_dir(&registry_path).unwrap();
-        fs::write(&registry_path, "not json").unwrap();
-        assert!(
-            load_registry(&registry_path)
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("invalid skill registry")
-        );
-        fs::write(&registry_path, r#"{"version": 2, "skills": {}}"#).unwrap();
-        assert!(
-            load_registry(&registry_path)
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("unsupported skill registry version")
-        );
-        fs::write(&registry_path, r#"{"version": 1, "skills": {"Bad_Name": {"package": "provider", "version": "1.0.0"}}}"#).unwrap();
-        assert!(
-            load_registry(&registry_path)
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("invalid skill name")
-        );
-
-        let blocker = root.join("registry-parent-is-file");
-        fs::write(&blocker, "file").unwrap();
-        let blocked_registry_path = blocker.join("registry.json");
-        let failure_path = blocked_registry_path.clone();
+        fs::remove_dir(&marker).unwrap();
+        for invalid in [
+            "not json",
+            "[]",
+            r#"{"ecosystem":2,"package":"provider","version":"1"}"#,
+            r#"{"ecosystem":"cargo","package":"provider"}"#,
+        ] {
+            fs::write(&marker, invalid).unwrap();
+            assert!(load_skill_owner(root).is_err());
+        }
+        let failure_path = marker.clone();
         let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
         });
         assert!(
-            load_registry(&blocked_registry_path)
-                .err()
-                .unwrap()
+            load_skill_owner(root)
+                .unwrap_err()
                 .to_string()
                 .contains("cannot inspect")
         );
-
-        assert!(path_exists(&registry_path).unwrap());
+        assert!(path_exists(&marker).unwrap());
         assert!(!path_exists(&root.join("absent")).unwrap());
-        let blocker = root.join("blocker");
-        fs::write(&blocker, "file").unwrap();
-        let child = blocker.join("child");
+        let child = marker.join("child");
         let failure_path = child.clone();
         let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
@@ -1399,16 +1368,13 @@ mod tests {
             path == failure_path
         });
         assert!(remove_existing(&child).is_err());
-        assert!(ensure_directory(&blocker).is_err());
-        assert!(ensure_directory(&blocker.join("child")).is_err());
+        assert!(ensure_directory(&marker).is_err());
+        assert!(ensure_directory(&child).is_err());
         let new_directory = root.join("new-directory");
         ensure_directory(&new_directory).unwrap();
         ensure_directory(&new_directory).unwrap();
-
-        let removable_file = root.join("removable-file");
-        fs::write(&removable_file, "file").unwrap();
-        remove_existing(&removable_file).unwrap();
-        assert!(!removable_file.exists());
+        remove_existing(&marker).unwrap();
+        assert!(!marker.exists());
     }
 
     #[test]
@@ -1444,27 +1410,18 @@ mod tests {
         let installer = make_installer(root, vec![provider.clone()]);
         let skills_root = root.join(".agents/skills");
         fs::create_dir_all(&skills_root).unwrap();
-        let registry = Registry {
-            version: REGISTRY_VERSION,
-            skills: BTreeMap::from([(
-                "provider-one".to_owned(),
-                SkillOwner {
-                    package: "different-provider".to_owned(),
-                    version: "1.0.0".to_owned(),
-                },
-            )]),
-        };
-        fs::write(
-            skills_root.join(REGISTRY_FILE),
-            serde_json::to_vec(&registry).unwrap(),
-        )
-        .unwrap();
+        seed_owner(
+            &skills_root.join("provider-one"),
+            "cargo",
+            "different-provider",
+            "1.0.0",
+        );
         assert!(
             install_skills(&installer, None, None)
                 .err()
                 .unwrap()
                 .to_string()
-                .contains("already installed from crate")
+                .contains("already installed from cargo package")
         );
 
         let directory = tempdir().unwrap();
@@ -1472,7 +1429,7 @@ mod tests {
         let empty = make_installer(root, Vec::new());
         assert!(install_skills(&empty, None, None).unwrap().is_empty());
         assert!(install_skills(&empty, None, None).unwrap().is_empty());
-        assert!(root.join(".agents/skills").join(REGISTRY_FILE).is_file());
+        assert!(installed_skill_names(root).unwrap().is_empty());
     }
 
     #[test]
@@ -1485,37 +1442,13 @@ mod tests {
         let skills_root = root.join(".agents/skills");
         fs::create_dir_all(skills_root.join("provider-stale")).unwrap();
         fs::create_dir_all(skills_root.join("other-stale")).unwrap();
-        let registry = Registry {
-            version: REGISTRY_VERSION,
-            skills: BTreeMap::from([
-                (
-                    "provider-stale".to_owned(),
-                    SkillOwner {
-                        package: "provider".to_owned(),
-                        version: "0.9.0".to_owned(),
-                    },
-                ),
-                (
-                    "other-stale".to_owned(),
-                    SkillOwner {
-                        package: "other".to_owned(),
-                        version: "0.9.0".to_owned(),
-                    },
-                ),
-                (
-                    "provider-vanished".to_owned(),
-                    SkillOwner {
-                        package: "provider".to_owned(),
-                        version: "0.8.0".to_owned(),
-                    },
-                ),
-            ]),
-        };
-        fs::write(
-            skills_root.join(REGISTRY_FILE),
-            serde_json::to_vec(&registry).unwrap(),
-        )
-        .unwrap();
+        seed_owner(
+            &skills_root.join("provider-stale"),
+            "cargo",
+            "provider",
+            "0.9.0",
+        );
+        seed_owner(&skills_root.join("other-stale"), "cargo", "other", "0.9.0");
 
         assert!(
             install_skills(&installer, Some("provider@1.0.0"), None)
@@ -1524,10 +1457,10 @@ mod tests {
         );
         assert!(!skills_root.join("provider-stale").exists());
         assert!(skills_root.join("other-stale").is_dir());
-        let updated = load_registry(&skills_root.join(REGISTRY_FILE)).unwrap();
-        assert!(!updated.skills.contains_key("provider-stale"));
-        assert!(!updated.skills.contains_key("provider-vanished"));
-        assert!(updated.skills.contains_key("other-stale"));
+        let updated = installed_skill_owners(&skills_root).unwrap();
+        assert!(!updated.contains_key("provider-stale"));
+
+        assert!(updated.contains_key("other-stale"));
     }
 
     #[test]
@@ -1541,28 +1474,14 @@ mod tests {
         let stale_skill = skills_root.join("provider-stale");
         fs::create_dir_all(&stale_skill).unwrap();
         fs::write(stale_skill.join("SKILL.md"), "stale skill\n").unwrap();
-        let registry = Registry {
-            version: REGISTRY_VERSION,
-            skills: BTreeMap::from([(
-                "provider-stale".to_owned(),
-                SkillOwner {
-                    package: "provider".to_owned(),
-                    version: "0.9.0".to_owned(),
-                },
-            )]),
-        };
-        fs::write(
-            skills_root.join(REGISTRY_FILE),
-            serde_json::to_vec(&registry).unwrap(),
-        )
-        .unwrap();
+        seed_owner(&stale_skill, "cargo", "provider", "0.9.0");
 
         install_skills(&installer, None, Some("provider-one")).unwrap();
 
         assert!(stale_skill.join("SKILL.md").is_file());
-        let registry = load_registry(&skills_root.join(REGISTRY_FILE)).unwrap();
-        assert!(registry.skills.contains_key("provider-stale"));
-        assert!(registry.skills.contains_key("provider-one"));
+        let owners = installed_skill_owners(&skills_root).unwrap();
+        assert!(owners.contains_key("provider-stale"));
+        assert!(owners.contains_key("provider-one"));
     }
 
     #[test]
@@ -1587,7 +1506,7 @@ mod tests {
             fs::read_to_string(destination.join("SKILL.md")).unwrap(),
             "project-owned skill\n"
         );
-        assert!(!root.join(".agents/skills").join(REGISTRY_FILE).exists());
+        assert!(!root.join(".agents/skills").join(OWNERSHIP_FILE).exists());
     }
 
     #[test]
@@ -1658,36 +1577,18 @@ mod tests {
         fs::create_dir_all(&stale_skill).unwrap();
         fs::write(stale_skill.join("SKILL.md"), "stale skill\n").unwrap();
 
-        let registry_path = skills_root.join(REGISTRY_FILE);
-        let registry = Registry {
-            version: REGISTRY_VERSION,
-            skills: BTreeMap::from([
-                (
-                    "provider-example".to_owned(),
-                    SkillOwner {
-                        package: "provider".to_owned(),
-                        version: "0.9.0".to_owned(),
-                    },
-                ),
-                (
-                    "provider-stale".to_owned(),
-                    SkillOwner {
-                        package: "provider".to_owned(),
-                        version: "0.9.0".to_owned(),
-                    },
-                ),
-            ]),
-        };
-        let previous_registry = serde_json::to_vec_pretty(&registry).unwrap();
-        fs::write(&registry_path, &previous_registry).unwrap();
+        let ownership_path = previous_skill.join(OWNERSHIP_FILE);
+        seed_owner(&previous_skill, "cargo", "provider", "0.9.0");
+        seed_owner(&stale_skill, "cargo", "provider", "0.9.0");
+        let previous_ownership = fs::read(&ownership_path).unwrap();
 
         (
             directory,
             installer,
             previous_skill,
             stale_skill,
-            registry_path,
-            previous_registry,
+            ownership_path,
+            previous_ownership,
         )
     }
 
@@ -1703,16 +1604,16 @@ mod tests {
         let installer = make_installer(root, vec![provider]);
         let skills_root = root.join(".agents/skills");
         let skill_path = skills_root.join("provider-example");
-        let registry_path = skills_root.join(REGISTRY_FILE);
+        let ownership_path = skill_path.join(OWNERSHIP_FILE);
 
-        (directory, installer, skill_path, registry_path)
+        (directory, installer, skill_path, ownership_path)
     }
 
     fn assert_transaction_restored(
         previous_skill: &Path,
         stale_skill: &Path,
-        registry_path: &Path,
-        previous_registry: &[u8],
+        ownership_path: &Path,
+        previous_ownership: &[u8],
     ) {
         assert_eq!(
             fs::read_to_string(previous_skill.join("SKILL.md")).unwrap(),
@@ -1722,33 +1623,19 @@ mod tests {
             fs::read_to_string(stale_skill.join("SKILL.md")).unwrap(),
             "stale skill\n"
         );
-        assert_eq!(fs::read(registry_path).unwrap(), previous_registry);
-    }
-
-    #[test]
-    fn restores_the_previous_install_when_registry_update_fails() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
-            transaction_fixture();
-        let failure_path = registry_path.clone();
-        let _failure =
-            filesystem::fail_once(filesystem::Operation::RenameDestination, move |path| {
-                path == failure_path
-            });
-        let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
-
-        assert!(error.to_string().contains("cannot update skill registry"));
-        assert_transaction_restored(
-            &previous_skill,
-            &stale_skill,
-            &registry_path,
-            &previous_registry,
-        );
+        assert_eq!(fs::read(ownership_path).unwrap(), previous_ownership);
     }
 
     #[test]
     fn restores_the_previous_skill_when_replacement_fails() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
-            transaction_fixture();
+        let (
+            _directory,
+            installer,
+            previous_skill,
+            stale_skill,
+            ownership_path,
+            previous_ownership,
+        ) = transaction_fixture();
         let failure_path = previous_skill.clone();
         let _failure =
             filesystem::fail_once(filesystem::Operation::RenameDestination, move |path| {
@@ -1760,14 +1647,14 @@ mod tests {
         assert_transaction_restored(
             &previous_skill,
             &stale_skill,
-            &registry_path,
-            &previous_registry,
+            &ownership_path,
+            &previous_ownership,
         );
     }
 
     #[test]
     fn rolls_back_a_first_install_when_skill_rename_fails() {
-        let (_directory, installer, skill_path, registry_path) = fresh_install_fixture();
+        let (_directory, installer, skill_path, ownership_path) = fresh_install_fixture();
         let failure_path = skill_path.clone();
         let _failure =
             filesystem::fail_once(filesystem::Operation::RenameDestination, move |path| {
@@ -1778,29 +1665,19 @@ mod tests {
 
         assert!(error.to_string().contains("cannot install skill"));
         assert!(!skill_path.exists());
-        assert!(!registry_path.exists());
-    }
-
-    #[test]
-    fn rolls_back_a_first_install_when_registry_commit_fails() {
-        let (_directory, installer, skill_path, registry_path) = fresh_install_fixture();
-        let failure_path = registry_path.clone();
-        let _failure =
-            filesystem::fail_once(filesystem::Operation::RenameDestination, move |path| {
-                path == failure_path
-            });
-
-        let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
-
-        assert!(error.to_string().contains("cannot update skill registry"));
-        assert!(!skill_path.exists());
-        assert!(!registry_path.exists());
+        assert!(!ownership_path.exists());
     }
 
     #[test]
     fn preserves_the_previous_install_when_existing_skill_cannot_be_moved() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
-            transaction_fixture();
+        let (
+            _directory,
+            installer,
+            previous_skill,
+            stale_skill,
+            ownership_path,
+            previous_ownership,
+        ) = transaction_fixture();
         let failure_path = previous_skill.clone();
         let _failure = filesystem::fail_once(filesystem::Operation::RenameSource, move |path| {
             path == failure_path
@@ -1811,15 +1688,21 @@ mod tests {
         assert_transaction_restored(
             &previous_skill,
             &stale_skill,
-            &registry_path,
-            &previous_registry,
+            &ownership_path,
+            &previous_ownership,
         );
     }
 
     #[test]
     fn rolls_back_installed_skills_when_stale_skill_cannot_be_moved() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
-            transaction_fixture();
+        let (
+            _directory,
+            installer,
+            previous_skill,
+            stale_skill,
+            ownership_path,
+            previous_ownership,
+        ) = transaction_fixture();
         let failure_path = stale_skill.clone();
         let _failure = filesystem::fail_once(filesystem::Operation::RenameSource, move |path| {
             path == failure_path
@@ -1834,60 +1717,45 @@ mod tests {
         assert_transaction_restored(
             &previous_skill,
             &stale_skill,
-            &registry_path,
-            &previous_registry,
+            &ownership_path,
+            &previous_ownership,
         );
     }
 
     #[test]
-    fn rolls_back_installed_skills_when_staged_registry_write_fails() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
-            transaction_fixture();
+    fn preserves_installed_skills_when_staged_ownership_write_fails() {
+        let (
+            _directory,
+            installer,
+            previous_skill,
+            stale_skill,
+            ownership_path,
+            previous_ownership,
+        ) = transaction_fixture();
         let _failure = filesystem::fail_once(filesystem::Operation::Write, |path| {
-            path.file_name() == Some(std::ffi::OsStr::new("registry.json"))
+            path.file_name() == Some(std::ffi::OsStr::new(OWNERSHIP_FILE))
         });
         let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("cannot write staged skill registry")
-        );
+        assert!(error.to_string().contains("cannot write"));
         assert_transaction_restored(
             &previous_skill,
             &stale_skill,
-            &registry_path,
-            &previous_registry,
-        );
-    }
-
-    #[test]
-    fn rolls_back_installed_skills_when_existing_registry_cannot_be_moved() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
-            transaction_fixture();
-        let failure_path = registry_path.clone();
-        let _failure = filesystem::fail_once(filesystem::Operation::RenameSource, move |path| {
-            path == failure_path
-        });
-        let error = install_skills(&installer, Some("provider@1.0.0"), None).unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("cannot move existing skill registry")
-        );
-        assert_transaction_restored(
-            &previous_skill,
-            &stale_skill,
-            &registry_path,
-            &previous_registry,
+            &ownership_path,
+            &previous_ownership,
         );
     }
 
     #[test]
     fn cleans_staging_directory_when_preparing_staging_files_fails() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
-            transaction_fixture();
+        let (
+            _directory,
+            installer,
+            previous_skill,
+            stale_skill,
+            ownership_path,
+            previous_ownership,
+        ) = transaction_fixture();
         let _failure = filesystem::fail_once(filesystem::Operation::CreateDirectory, |path| {
             path.file_name() == Some(std::ffi::OsStr::new("backups"))
         });
@@ -1897,11 +1765,11 @@ mod tests {
         assert_transaction_restored(
             &previous_skill,
             &stale_skill,
-            &registry_path,
-            &previous_registry,
+            &ownership_path,
+            &previous_ownership,
         );
         assert!(
-            fs::read_dir(registry_path.parent().unwrap())
+            fs::read_dir(ownership_path.parent().unwrap().parent().unwrap())
                 .unwrap()
                 .all(|entry| !entry
                     .unwrap()
@@ -1926,8 +1794,8 @@ mod tests {
 
     #[test]
     fn cleans_staging_files_when_writing_a_skill_fails() {
-        let (_directory, installer, skill_path, registry_path) = fresh_install_fixture();
-        let skills_root = registry_path.parent().unwrap();
+        let (_directory, installer, skill_path, ownership_path) = fresh_install_fixture();
+        let skills_root = ownership_path.parent().unwrap().parent().unwrap();
         fs::create_dir_all(skills_root).unwrap();
         let unrelated_file = skills_root.join("unrelated-file");
         fs::write(&unrelated_file, "keep this file\n").unwrap();
@@ -1939,7 +1807,7 @@ mod tests {
 
         assert!(error.to_string().contains("cannot write"));
         assert!(!skill_path.exists());
-        assert!(!registry_path.exists());
+        assert!(!ownership_path.exists());
         assert!(unrelated_file.is_file());
         assert!(fs::read_dir(skills_root).unwrap().all(|entry| {
             !entry
@@ -1967,24 +1835,30 @@ mod tests {
     }
 
     #[test]
-    fn reports_skill_registry_read_errors() {
+    fn reports_skill_ownership_read_errors() {
         let directory = tempdir().unwrap();
-        let registry_path = directory.path().join("registry.json");
-        fs::write(&registry_path, r#"{"version":1,"skills":{}}"#).unwrap();
-        let failure_path = registry_path.clone();
-        let _failure = filesystem::fail_once(filesystem::Operation::Read, move |path| {
-            path == failure_path
-        });
-
-        let error = load_registry(&registry_path).unwrap_err();
-
-        assert!(error.to_string().contains("cannot read"));
+        seed_owner(directory.path(), "cargo", "provider", "1.0.0");
+        let marker = directory.path().join(OWNERSHIP_FILE);
+        let _failure =
+            filesystem::fail_once(filesystem::Operation::Read, move |path| path == marker);
+        assert!(
+            load_skill_owner(directory.path())
+                .unwrap_err()
+                .to_string()
+                .contains("cannot read")
+        );
     }
 
     #[test]
     fn reports_destination_inspection_errors_before_changing_installed_skills() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
-            transaction_fixture();
+        let (
+            _directory,
+            installer,
+            previous_skill,
+            stale_skill,
+            ownership_path,
+            previous_ownership,
+        ) = transaction_fixture();
         let failure_path = previous_skill.clone();
         let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
@@ -1996,16 +1870,22 @@ mod tests {
         assert_transaction_restored(
             &previous_skill,
             &stale_skill,
-            &registry_path,
-            &previous_registry,
+            &ownership_path,
+            &previous_ownership,
         );
     }
 
     #[test]
     fn reports_stale_skill_inspection_errors_before_changing_installed_skills() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, previous_registry) =
-            transaction_fixture();
-        let failure_path = stale_skill.clone();
+        let (
+            _directory,
+            installer,
+            previous_skill,
+            stale_skill,
+            ownership_path,
+            previous_ownership,
+        ) = transaction_fixture();
+        let failure_path = stale_skill.join(OWNERSHIP_FILE);
         let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
             path == failure_path
         });
@@ -2016,14 +1896,14 @@ mod tests {
         assert_transaction_restored(
             &previous_skill,
             &stale_skill,
-            &registry_path,
-            &previous_registry,
+            &ownership_path,
+            &previous_ownership,
         );
     }
 
     #[test]
     fn reports_staging_cleanup_errors_after_committing_the_install() {
-        let (_directory, installer, previous_skill, stale_skill, registry_path, _) =
+        let (_directory, installer, previous_skill, stale_skill, _ownership_path, _) =
             transaction_fixture();
         let _failure = filesystem::fail_once(filesystem::Operation::RemoveDirectoryTree, |path| {
             path.file_name()
@@ -2040,9 +1920,9 @@ mod tests {
                 .contains("# Updated example")
         );
         assert!(!stale_skill.exists());
-        let registry = load_registry(&registry_path).unwrap();
-        assert_eq!(registry.skills["provider-example"].version, "1.0.0");
-        assert!(!registry.skills.contains_key("provider-stale"));
+        let owners = installed_skill_owners(previous_skill.parent().unwrap()).unwrap();
+        assert_eq!(owners["provider-example"].version, "1.0.0");
+        assert!(!owners.contains_key("provider-stale"));
     }
 
     #[cfg(unix)]
@@ -2092,6 +1972,271 @@ mod tests {
         let error = result.unwrap_err().to_string();
         assert!(error.contains("cannot update"), "{error}");
         assert!(!root.join(".agents/skills/provider-one").exists());
-        assert!(!root.join(".agents/skills").join(REGISTRY_FILE).exists());
+        assert!(!root.join(".agents/skills").join(OWNERSHIP_FILE).exists());
+    }
+
+    #[test]
+    fn preserves_extra_metadata_and_treats_resources_as_opaque_files() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let provider = package(root, "provider", "1.0.0");
+        write_skill(
+            &provider,
+            "workflow.md",
+            "---\ntype: skill\ndescription: Run workflow.\nlicense: MIT\nmetadata:\n  author: Provider\n---\n\n# Workflow\n",
+        );
+        write_skill(
+            &provider,
+            "workflow/references/guide.md",
+            "---\ntype: resource\nlayout: example\n---\n\n# Resource\n",
+        );
+        let installer = make_installer(root, vec![provider]);
+        install_skills(&installer, None, None).unwrap();
+        let installed =
+            fs::read_to_string(root.join(".agents/skills/provider-workflow/SKILL.md")).unwrap();
+        assert!(installed.contains("license: MIT"));
+        assert!(installed.contains("author: Provider"));
+        assert!(
+            root.join(".agents/skills/provider-workflow/references/guide.md")
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn refresh_preserves_foreign_ownership_and_refuses_foreign_collisions() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let foreign = root.join(".agents/skills/gem-workflow");
+        seed_owner(&foreign, "gem", "provider", "1.0.0");
+        fs::write(foreign.join("SKILL.md"), "Ruby skill").unwrap();
+        let before = fs::read(foreign.join(OWNERSHIP_FILE)).unwrap();
+        let provider = package(root, "provider", "2.0.0");
+        write_skill(
+            &provider,
+            "workflow.md",
+            &skill_document("Workflow.", "# Workflow\n"),
+        );
+        let installer = make_installer(root, vec![provider]);
+        install_skills(&installer, None, None).unwrap();
+        install_skills(&make_installer(root, Vec::new()), None, None).unwrap();
+        assert_eq!(installed_skill_names(root).unwrap(), ["gem-workflow"]);
+        assert_eq!(fs::read(foreign.join(OWNERSHIP_FILE)).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(foreign.join("SKILL.md")).unwrap(),
+            "Ruby skill"
+        );
+        seed_owner(
+            &root.join(".agents/skills/provider-workflow"),
+            "gem",
+            "provider",
+            "1.0.0",
+        );
+        assert!(install_skills(&installer, None, None).is_err());
+    }
+
+    #[test]
+    fn rejects_incomplete_owners_before_installation() {
+        for invalid in [
+            r#"["cargo","provider","1.0.0"]"#,
+            r#"{"package":"provider","version":"1.0.0"}"#,
+            r#"{"ecosystem":" ","package":"provider","version":"1.0.0"}"#,
+            r#"{"ecosystem":"cargo","package":"","version":"1.0.0"}"#,
+            r#"{"ecosystem":"cargo","package":"provider","version":""}"#,
+        ] {
+            let directory = tempdir().unwrap();
+            let root = directory.path();
+            write(root, ".agents/skills/provider-workflow/skill.json", invalid);
+            write(
+                root,
+                ".agents/skills/provider-workflow/SKILL.md",
+                "Existing instructions",
+            );
+            let installer = make_installer(root, Vec::new());
+            assert!(install_skills(&installer, None, None).is_err());
+            assert_eq!(
+                fs::read_to_string(root.join(".agents/skills/provider-workflow/skill.json"))
+                    .unwrap(),
+                invalid
+            );
+            assert_eq!(
+                fs::read_to_string(root.join(".agents/skills/provider-workflow/SKILL.md")).unwrap(),
+                "Existing instructions"
+            );
+        }
+    }
+
+    #[test]
+    fn reads_the_portable_skill_ownership_fixture() {
+        let directory = tempdir().unwrap();
+        let fixture = include_str!("../tests/fixtures/skill.json");
+        fs::write(directory.path().join(OWNERSHIP_FILE), fixture).unwrap();
+        let owner = load_skill_owner(directory.path()).unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(owner).unwrap(),
+            serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+        );
+    }
+
+    #[test]
+    fn scans_ownership_and_validates_managed_directory_names() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let skills = root.join(".agents/skills");
+        assert!(installed_skill_owners(&skills).unwrap().is_empty());
+        fs::create_dir_all(skills.join("project-owned")).unwrap();
+        fs::write(skills.join("unrelated"), "file").unwrap();
+        seed_owner(
+            &skills.join("provider-workflow"),
+            "cargo",
+            "provider",
+            "1.0.0",
+        );
+        assert_eq!(installed_skill_names(root).unwrap(), ["provider-workflow"]);
+        for name in ["Bad_Name".to_owned(), "a".repeat(65)] {
+            seed_owner(&skills.join(&name), "cargo", "provider", "1.0.0");
+            assert!(installed_skill_names(root).is_err());
+            fs::remove_dir_all(skills.join(name)).unwrap();
+        }
+        let file_root = root.join("file-root");
+        fs::write(&file_root, "file").unwrap();
+        assert!(installed_skill_owners(&file_root).is_err());
+        let failure_path = skills.clone();
+        let _failure = filesystem::fail_once(filesystem::Operation::Inspect, move |path| {
+            path == failure_path
+        });
+        assert!(
+            installed_skill_names(root)
+                .unwrap_err()
+                .to_string()
+                .contains("cannot inspect")
+        );
+        let failure_path = skills.clone();
+        let _failure = filesystem::fail_once(filesystem::Operation::ReadDirectory, move |path| {
+            path == failure_path
+        });
+        assert!(
+            installed_skill_names(root)
+                .unwrap_err()
+                .to_string()
+                .contains("cannot read")
+        );
+        let failure_path = skills.clone();
+        let _failure =
+            filesystem::fail_once(filesystem::Operation::ReadDirectoryEntry, move |path| {
+                path == failure_path
+            });
+        assert!(installed_skill_names(root).is_err());
+        let failure_path = skills.join("project-owned");
+        let _failure = filesystem::fail_once(filesystem::Operation::FileType, move |path| {
+            path == failure_path
+        });
+        assert!(installed_skill_names(root).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_ownership_symlinks_and_skips_linked_directories() {
+        use std::os::unix::fs::symlink;
+        let directory = tempdir().unwrap();
+        let skills = directory.path().join(".agents/skills");
+        let provider = skills.join("provider-workflow");
+        seed_owner(&provider, "cargo", "provider", "1.0.0");
+        symlink(&provider, skills.join("linked-skill")).unwrap();
+        assert_eq!(
+            installed_skill_names(directory.path()).unwrap(),
+            ["provider-workflow"]
+        );
+        let linked_root = directory.path().join("linked-root");
+        symlink(&skills, &linked_root).unwrap();
+        assert!(installed_skill_owners(&linked_root).is_err());
+        fs::remove_file(provider.join(OWNERSHIP_FILE)).unwrap();
+        symlink("missing.json", provider.join(OWNERSHIP_FILE)).unwrap();
+        assert!(installed_skill_names(directory.path()).is_err());
+    }
+
+    #[test]
+    fn reserves_generated_resource_names_and_allows_nested_metadata() {
+        let directory = tempdir().unwrap();
+        let source = directory.path().join("resources");
+        let destination = directory.path().join("destination");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&destination).unwrap();
+        for name in ["skill.json", "SKILL.JSON", "SKILL.md"] {
+            let path = source.join(name);
+            fs::write(&path, "Conflict").unwrap();
+            assert!(
+                copy_skill_assets(&source, &destination, true)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("reserved")
+            );
+            fs::remove_file(&path).unwrap();
+            fs::create_dir(&path).unwrap();
+            assert!(
+                copy_skill_assets(&source, &destination, true)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("reserved")
+            );
+            fs::remove_dir(path).unwrap();
+        }
+        fs::create_dir(source.join("references")).unwrap();
+        fs::write(source.join("references/skill.json"), "Opaque resource").unwrap();
+        copy_skill_assets(&source, &destination, true).unwrap();
+        assert_eq!(
+            fs::read_to_string(destination.join("references/skill.json")).unwrap(),
+            "Opaque resource"
+        );
+    }
+
+    #[test]
+    fn restores_git_exclusions_and_all_skills_when_commit_fails() {
+        for failure in 0..3 {
+            let (directory, installer, previous_skill, stale_skill, marker, original_marker) =
+                transaction_fixture();
+            let root = directory.path();
+            assert!(
+                std::process::Command::new("git")
+                    .args(["init", "--quiet"])
+                    .current_dir(root)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let exclude = root.join(".git/info/exclude");
+            let original = fs::read(&exclude).unwrap();
+            let provider = &installer.packages()[0];
+            write_skill(
+                provider,
+                "aardvark.md",
+                &skill_document("New workflow.", "# New"),
+            );
+            let (operation, path) = match failure {
+                0 => (filesystem::Operation::RenameSource, previous_skill.clone()),
+                1 => (
+                    filesystem::Operation::RenameDestination,
+                    previous_skill.clone(),
+                ),
+                _ => (filesystem::Operation::RenameSource, stale_skill.clone()),
+            };
+            let _failure = filesystem::fail_once(operation, move |candidate| candidate == path);
+            assert!(install_skills(&installer, None, None).is_err());
+            assert_transaction_restored(&previous_skill, &stale_skill, &marker, &original_marker);
+            assert_eq!(fs::read(&exclude).unwrap(), original);
+            assert!(!root.join(".agents/skills/provider-aardvark").exists());
+        }
+    }
+
+    fn seed_owner(directory: &Path, ecosystem: &str, package: &str, version: &str) {
+        fs::create_dir_all(directory).unwrap();
+        write_skill_owner(
+            directory,
+            &SkillOwner {
+                ecosystem: ecosystem.to_owned(),
+                package: package.to_owned(),
+                version: version.to_owned(),
+            },
+        )
+        .unwrap();
     }
 }

@@ -125,7 +125,7 @@ fn lists_context_files_without_listing_skill_documents_or_assets() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
 
     let packages = installer.packages();
     assert_eq!(packages.len(), 1);
@@ -147,7 +147,7 @@ fn lists_context_files_without_listing_skill_documents_or_assets() {
 #[test]
 fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     let (_directory, root) = project();
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     let skills = list_skills(&installer, None).unwrap();
 
     assert_eq!(skills.len(), 1);
@@ -171,7 +171,6 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
     assert!(exclude.contains("# BEGIN bake-agent-context\n"));
     assert!(exclude.contains("/.agents/context/\n"));
-    assert!(exclude.contains("/.agents/skills/.agent-context-skills.json\n"));
     assert!(exclude.contains(&format!("/.agents/skills/{INSTALLED_SKILL_NAME}/\n")));
     assert!(exclude.contains("# END bake-agent-context\n"));
     assert!(!exclude.lines().any(|line| line == "/.agents/skills/"));
@@ -248,7 +247,7 @@ fn names_the_usage_skill_from_its_file_and_package() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     let skills = list_skills(&installer, None).unwrap();
     let usage = skills
         .iter()
@@ -269,7 +268,7 @@ fn skill_installation_does_not_overwrite_project_owned_skills() {
         &format!(".agents/skills/{INSTALLED_SKILL_NAME}/SKILL.md"),
         "Project-owned skill.\n",
     );
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
 
     let error = install_skills(&installer, None, None).unwrap_err();
     assert!(
@@ -299,7 +298,7 @@ fn maintains_local_excludes_without_hiding_project_owned_skills() {
         "Project-owned skill.\n",
     );
     write(&root, ".git/info/exclude", "# Local user rule\n*.local\n");
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
 
     install_skills(&installer, None, None).unwrap();
 
@@ -307,7 +306,6 @@ fn maintains_local_excludes_without_hiding_project_owned_skills() {
     let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
     assert_eq!(actual_gitignore, gitignore);
     assert!(exclude.contains("/.agents/context/\n"));
-    assert!(exclude.contains("/.agents/skills/.agent-context-skills.json\n"));
     assert!(exclude.contains(&format!("/.agents/skills/{INSTALLED_SKILL_NAME}/\n")));
     assert!(exclude.contains("# Local user rule\n*.local\n"));
     assert!(!exclude.lines().any(|line| line == "/.agents/skills/"));
@@ -363,7 +361,7 @@ fn maintains_local_excludes_without_hiding_project_owned_skills() {
 fn skill_installation_works_without_a_git_checkout() {
     let (_directory, root) = project();
     fs::remove_dir_all(root.join(".git")).unwrap();
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
 
     install_skills(&installer, None, None).unwrap();
 
@@ -425,7 +423,7 @@ fn installs_context_and_updates_index_without_changing_agents_file() {
     assert!(first.contains("First paragraph."));
     assert!(!first.contains("Later details."));
 
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     let index = ContextIndex::new(&root).with_packages(installer.packages());
     index.update_index().unwrap();
     assert_eq!(fs::read_to_string(index_path).unwrap(), first);
@@ -434,7 +432,7 @@ fn installs_context_and_updates_index_without_changing_agents_file() {
 #[test]
 fn context_index_does_not_create_or_modify_agents_file() {
     let (_directory, root) = project();
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     installer.install_all().unwrap();
     let index = ContextIndex::new(&root);
 
@@ -463,7 +461,7 @@ fn public_context_paths_render_fallback_titles_and_remove_empty_directories() {
     );
     fs::create_dir_all(provider.join("context/empty-directory")).unwrap();
 
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     assert_eq!(installer.context_path(), root.join(".agents/context"));
     assert_eq!(
         ContextIndex::new(&root).context_path(),
@@ -534,7 +532,7 @@ fn discovers_multiple_context_providers_and_orders_their_skills() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     assert_eq!(
         installer
             .packages()
@@ -582,7 +580,7 @@ fn sorts_skills_within_a_provider_by_name() {
         "---\ntype: skill\ndescription: A second test skill.\n---\n\n# Another Skill\n",
     );
 
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     let skills = list_skills(&installer, None).unwrap();
     let names: Vec<_> = skills.iter().map(|skill| skill.name.as_str()).collect();
     assert_eq!(
@@ -614,7 +612,7 @@ fn context_index_includes_frontmatter_descriptions() {
         "---\n---\n\n# No Description\n\nUse the first paragraph as its summary.\n",
     );
 
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     installer.install_all().unwrap();
     let rendered = ContextIndex::new(&root)
         .with_packages(installer.packages())
@@ -636,7 +634,7 @@ fn selecting_one_skill_keeps_other_installed_skills() {
         "context/secondary.md",
         "---\ntype: skill\ndescription: A secondary skill.\n---\n\n# Secondary\n",
     );
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
 
     install_skills(&installer, None, None).unwrap();
     assert_eq!(
@@ -657,33 +655,33 @@ fn selecting_one_skill_keeps_other_installed_skills() {
 
     let skills_root = root.join(".agents/skills");
     assert!(skills_root.join("docs-provider-secondary").is_dir());
-    let registry = fs::read_to_string(skills_root.join(".agent-context-skills.json")).unwrap();
-    assert!(registry.contains("docs-provider-secondary"));
+    let owner = fs::read_to_string(skills_root.join("docs-provider-secondary/skill.json")).unwrap();
+    assert!(owner.contains("docs-provider"));
 }
 
 #[cfg(unix)]
 #[test]
-fn reports_registry_read_and_skill_directory_creation_errors() {
+fn reports_ownership_read_and_skill_directory_creation_errors() {
     let (_directory, root) = project();
-    let registry_path = root.join(".agents/skills/.agent-context-skills.json");
+    let ownership_path = root.join(".agents/skills/provider-workflow/skill.json");
     write(
         &root,
-        ".agents/skills/.agent-context-skills.json",
-        "{\"version\":1,\"skills\":{}}\n",
+        ".agents/skills/provider-workflow/skill.json",
+        r#"{"ecosystem":"cargo","package":"provider","version":"1"}"#,
     );
-    fs::set_permissions(&registry_path, fs::Permissions::from_mode(0o000)).unwrap();
-    let installer = Installer::new(&root).unwrap();
+    fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o000)).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     let error = install_skills(&installer, None, None)
         .unwrap_err()
         .to_string();
-    fs::set_permissions(&registry_path, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o600)).unwrap();
     assert!(error.contains("cannot read"), "{error}");
 
     let (_directory, root) = project();
     let agents_directory = root.join(".agents");
     fs::create_dir_all(&agents_directory).unwrap();
     fs::set_permissions(&agents_directory, fs::Permissions::from_mode(0o555)).unwrap();
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     let error = install_skills(&installer, None, None)
         .unwrap_err()
         .to_string();
@@ -703,7 +701,7 @@ fn reports_context_removal_errors_without_overwriting_existing_files() {
     );
     fs::set_permissions(&context_root, fs::Permissions::from_mode(0o555)).unwrap();
 
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     let result = installer.install_package("docs-provider");
     fs::set_permissions(&context_root, fs::Permissions::from_mode(0o755)).unwrap();
 
@@ -715,7 +713,7 @@ fn reports_context_removal_errors_without_overwriting_existing_files() {
 fn validates_skill_documents_through_the_dependency_build() {
     let (_directory, root) = project();
     let provider = root.parent().unwrap().join("provider/context");
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
 
     assert_eq!(
         list_skills(&installer, Some("docs-provider"))
@@ -846,7 +844,7 @@ fn rejects_non_regular_skill_assets_in_the_dependency_build() {
     let target = root.join("asset-target.txt");
     fs::write(&target, "target").unwrap();
     symlink(&target, assets.join("link")).unwrap();
-    let error = install_skills(&Installer::new(&root).unwrap(), None, None)
+    let error = install_skills(&Installer::discover(&root).unwrap(), None, None)
         .unwrap_err()
         .to_string();
     assert!(error.contains("cannot contain symbolic links"), "{error}");
@@ -858,11 +856,11 @@ fn rejects_non_regular_skill_assets_in_the_dependency_build() {
         "Reserved skill asset.\n",
     )
     .unwrap();
-    let error = install_skills(&Installer::new(&root).unwrap(), None, None)
+    let error = install_skills(&Installer::discover(&root).unwrap(), None, None)
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("reserved for the generated skill instructions"),
+        error.contains("reserved for generated skill files"),
         "{error}"
     );
 
@@ -871,7 +869,7 @@ fn rejects_non_regular_skill_assets_in_the_dependency_build() {
     let socket_path = provider.join("context/initial-gem-setup/socket");
     let status = Command::new("mkfifo").arg(&socket_path).status().unwrap();
     assert!(status.success(), "mkfifo failed: {status}");
-    let error = install_skills(&Installer::new(&root).unwrap(), None, None)
+    let error = install_skills(&Installer::discover(&root).unwrap(), None, None)
         .unwrap_err()
         .to_string();
     assert!(error.contains("unsupported skill asset"), "{error}");
@@ -887,7 +885,7 @@ fn adds_a_final_newline_to_parsed_skill_documents() {
         "---\ntype: skill\ndescription: A skill without a final newline.\n---\n\n# No Final Newline",
     );
 
-    install_skills(&Installer::new(&root).unwrap(), None, None).unwrap();
+    install_skills(&Installer::discover(&root).unwrap(), None, None).unwrap();
     let installed =
         fs::read_to_string(root.join(".agents/skills/docs-provider-no-final-newline/SKILL.md"))
             .unwrap();
@@ -897,7 +895,7 @@ fn adds_a_final_newline_to_parsed_skill_documents() {
 #[test]
 fn reports_public_index_installer_and_cargo_metadata_errors() {
     let (_directory, root) = project();
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     fs::create_dir_all(root.join(".agents")).unwrap();
     fs::write(root.join(".agents/context"), "not a directory").unwrap();
     assert!(
@@ -915,7 +913,7 @@ fn reports_public_index_installer_and_cargo_metadata_errors() {
         "Cargo.toml",
         "this is not valid TOML = [\n",
     );
-    let error = Installer::new(directory.path()).unwrap_err();
+    let error = Installer::discover(directory.path()).unwrap_err();
     assert!(error.to_string().contains("cargo metadata failed"));
 
     let directory = tempfile::tempdir().unwrap();
@@ -931,12 +929,12 @@ fn reports_public_index_installer_and_cargo_metadata_errors() {
 }
 
 #[test]
-fn rejects_invalid_skill_registries_and_installation_paths() {
+fn rejects_invalid_skill_ownership_and_installation_paths() {
     let (_directory, root) = project();
     let skills_root = root.join(".agents/skills");
     fs::create_dir_all(root.join(".agents")).unwrap();
     fs::write(&skills_root, "not a directory").unwrap();
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     assert!(
         install_skills(&installer, None, None)
             .unwrap_err()
@@ -945,33 +943,37 @@ fn rejects_invalid_skill_registries_and_installation_paths() {
     );
 
     let (_directory, root) = project();
-    let installer = Installer::new(&root).unwrap();
-    let registry_path = root.join(".agents/skills/.agent-context-skills.json");
+    let installer = Installer::discover(&root).unwrap();
+    let ownership_path = root.join(".agents/skills/provider-workflow/skill.json");
     write(
         &root,
-        ".agents/skills/.agent-context-skills.json",
+        ".agents/skills/provider-workflow/skill.json",
         "{invalid json}",
     );
     assert!(
         install_skills(&installer, None, None)
             .unwrap_err()
             .to_string()
-            .contains("invalid skill registry")
+            .contains("invalid skill ownership")
     );
 
-    fs::write(&registry_path, r#"{"version":2,"skills":{}}"#).unwrap();
+    fs::write(
+        &ownership_path,
+        r#"{"ecosystem":"cargo","package":" ","version":"1"}"#,
+    )
+    .unwrap();
     assert!(
         install_skills(&installer, None, None)
             .unwrap_err()
             .to_string()
-            .contains("unsupported skill registry version")
+            .contains("invalid owner")
     );
 }
 
 #[test]
 fn show_supports_implicit_markdown_extension_and_rejects_parent_paths() {
     let (_directory, root) = project();
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
 
     assert_eq!(
         installer
@@ -996,7 +998,7 @@ fn extracts_title_and_first_sentence_from_markdown() {
         "<!--\n# Not a title\n-->\n\n# Nested usage\n\nRead the guide first. Then apply its examples.\n",
     );
 
-    let installer = Installer::new(&root).unwrap();
+    let installer = Installer::discover(&root).unwrap();
     installer.install_all().unwrap();
 
     let section = ContextIndex::new(&root)

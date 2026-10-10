@@ -20,7 +20,7 @@ fn installer(context: &mut Context) -> Result<Installer> {
         return Ok(installer.clone());
     }
 
-    let installer = Installer::new(context.root())?;
+    let installer = Installer::discover(context.root())?;
     context.insert(installer.clone());
     Ok(installer)
 }
@@ -266,9 +266,12 @@ mod tests {
         let provider = package(root, "provider", "1.0.0");
         write(&provider.context_path.join("guide.md"), "# Guide\n");
 
-        let registry = root.join(".agents/skills/.agent-context-skills.json");
-        write(&registry, r#"{"version":1,"skills":{}}"#);
-        let failure_path = registry.clone();
+        let ownership = root.join(".agents/skills/provider-workflow/skill.json");
+        write(
+            &ownership,
+            r#"{"ecosystem":"cargo","package":"provider","version":"1.0.0"}"#,
+        );
+        let failure_path = ownership.clone();
         let _failure = test_filesystem::fail_once(test_filesystem::Operation::Read, move |path| {
             path == failure_path
         });

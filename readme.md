@@ -31,7 +31,7 @@ cargo bake agent:context:skill:install
 cargo bake agent:context:skill:install --package socketry-executor --skill socketry-executor-initial-gem-setup
 ```
 
-`cargo bake agent:context:install` writes `.agents/context/index.md` and maintains a marked section in the local Git exclude file (`.git/info/exclude`) for generated context, the skill registry, and dependency-installed skill directories. These exclusions stay in the checkout and are not committed. Project-owned skill directories remain trackable. The task does not create or modify the repository owner's `agents.md`; a project can add a stable link to the generated index if desired.
+`cargo bake agent:context:install` writes `.agents/context/index.md` and maintains a marked section in the local Git exclude file (`.git/info/exclude`) for generated context and dependency-installed skill directories. These exclusions stay in the checkout and are not committed. Project-owned skill directories remain trackable. The task does not create or modify the repository owner's `agents.md`; a project can add a stable link to the generated index if desired.
 
 Context documents marked with `type: skill` are installed only under `.agents/skills/`, along with their companion resources. Their installed names are prefixed with the provider crate name, and they are omitted from `.agents/context/` and its generated index. Use `agent:context:install --package CRATE` to install both context and skills from one provider. The separate skill tasks are useful for listing skills or installing a selected skill. Project-owned skills can live in `.agents/skills/` and remain version controlled.
 
@@ -97,3 +97,5 @@ Please open an issue or pull request on [GitHub](https://github.com/socketry/bak
 ### Agent Context
 
 Run `cargo bake agent:context:install` to install shared context and skills. Read `.agents/context/index.md` to find relevant guides, follow `agents.md` if present, and apply skills under `.agents/skills/`. The installer preserves repository-owned `agents.md`; it does not create or regenerate that file.
+
+Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification for the shared format.
