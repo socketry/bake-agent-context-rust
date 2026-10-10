@@ -33,4 +33,4 @@ List skills provided by dependencies with `cargo bake agent:context:skill:list`.
 
 The install task maintains a marked block in the repository's local Git exclude file (`.git/info/exclude`) for generated `.agents/context/` files and dependency-installed skill directories. These local exclusions are not committed. Project-owned skill directories remain trackable. If the project wants a top-level agent entrypoint, its owner can add a stable link to `.agents/context/index.md` in `agents.md`.
 
-Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification and `context/skill.schema.json` for the shared format.
+Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification for the shared format.

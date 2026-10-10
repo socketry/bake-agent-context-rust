@@ -22,4 +22,4 @@ Add `bake-agent-context` to the project's private `bake/` package, directly or t
 
 Before changing a project, follow its `agents.md` instructions, read relevant installed context from `.agents/context/index.md`, and apply any skills that fit the work. For details about the available Bake tasks and their options, use the `bake-agent-context-usage` skill.
 
-Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification and `context/skill.schema.json` for the shared format.
+Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification for the shared format.
